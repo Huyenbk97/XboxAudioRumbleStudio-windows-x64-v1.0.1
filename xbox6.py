@@ -1967,6 +1967,28 @@ class VibrationApp:
         self.dual_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(mode, text="Tách 2 Motor chuẩn phần cứng (Trái: Trầm/Nổ - Phải: Súng/Đanh)", variable=self.dual_var, command=self.set_dual_motor).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
+        # 🎯 Phase 3: Trigger Haptics
+        self.trigger_haptics_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(mode, text="🎯 Rung 2 nút cò LT/RT (Xbox Impulse & Flydigi Triggers)", variable=self.trigger_haptics_var, command=self.set_trigger_haptics).grid(row=4, column=0, sticky="w", pady=(6, 0))
+
+        trig_row = tk.Frame(mode, bg="#151b24")
+        trig_row.grid(row=5, column=0, sticky="ew", pady=(4, 0))
+        ttk.Label(trig_row, text="Kiểu rung cò:").pack(side="left")
+        self.trigger_mode_var = tk.StringVar(value="🎯 Tự động tối ưu: RT Bắn / LT Phanh")
+        self.trigger_mode_combo = ttk.Combobox(
+            trig_row,
+            textvariable=self.trigger_mode_var,
+            values=[
+                "🎯 Tự động tối ưu: RT Bắn / LT Phanh",
+                "🔊 Định hướng Stereo: Trái/Phải theo âm",
+                "⚡ Đồng bộ toàn dải cùng 2 motor thân",
+            ],
+            state="readonly",
+            width=32,
+        )
+        self.trigger_mode_combo.pack(side="right", fill="x", expand=True, padx=(8, 0))
+        self.trigger_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self.set_trigger_mode())
+
         # 3. Panel Đèn LED RGB Apex (Flydigi)
         apex_box, apex_panel = self.make_panel(left, "Đèn LED RGB Tay Cầm Apex (Flydigi)")
         apex_box.grid(row=2, column=0, sticky="ew", pady=(0, 10))
@@ -2090,6 +2112,8 @@ class VibrationApp:
             ("Overdrive Kick (Triệt trễ)", "overdrive_boost", 0.0, 1.0, "{:.2f}", False, "Xung kích tốc tức thì khi có tiếng súng/nổ, khắc phục độ ì của motor."),
             ("Lực nhịp điệu (Punch)", "rhythm_punch", 0.0, 1.0, "{:.2f}", False, "Độ nảy uy lực theo tiếng trống, tiếng nổ và dập cơ học."),
             ("Độ tê chi tiết (Texture)", "texture_amount", 0.0, 1.0, "{:.2f}", False, "Độ tê mịn tần số cao (bước chân, cạ kim loại, hơi thở)."),
+            ("Lực Cò Trái (LT - Phanh/Ngắm)", "trigger_left_gain", 0.0, 1.0, "{:.2f}", False, "Cường độ rung nút cò LT (Xbox Impulse / Flydigi)."),
+            ("Lực Cò Phải (RT - Bắn/Ga)", "trigger_right_gain", 0.0, 1.0, "{:.2f}", False, "Cường độ rung nút cò RT (Xbox Impulse / Flydigi)."),
         ]
         for row, spec in enumerate(slider_specs):
             self.add_slider(controls, row, *spec)
@@ -2115,21 +2139,23 @@ class VibrationApp:
 
         monitor = tk.Frame(right, bg="#151b24")
         monitor.grid(row=1, column=0, sticky="nsew", padx=18, pady=(8, 14))
-        for column in range(7):
+        for column in range(9):
             monitor.columnconfigure(column, weight=1)
         monitor.rowconfigure(0, weight=1)
 
         self.meters = {
-            "total": VerticalMeter(monitor, "Tổng âm lượng", "#94a3b8", 6000, width=82),
-            "bass": VerticalMeter(monitor, "Trầm / Nổ (Trái)", "#38bdf8", 6000, width=82),
-            "crisp": VerticalMeter(monitor, "Đanh / Súng (Phải)", "#a855f7", 4000, width=82),
-            "beat": VerticalMeter(monitor, "Nhịp điệu", "#f59e0b", 1.0, "{:.3f}", width=82),
-            "overdrive": VerticalMeter(monitor, "Xung Kick", "#ef4444", 0.6, "{:.3f}", width=82),
-            "left": VerticalMeter(monitor, "Motor Trái (Nặng)", "#34d399", 1.0, "{:.3f}", width=92, height=300),
-            "right": VerticalMeter(monitor, "Motor Phải (Nhẹ)", "#60a5fa", 1.0, "{:.3f}", width=92, height=300),
+            "total": VerticalMeter(monitor, "Tổng âm", "#94a3b8", 6000, width=68),
+            "bass": VerticalMeter(monitor, "Trầm / Nổ", "#38bdf8", 6000, width=68),
+            "crisp": VerticalMeter(monitor, "Đanh / Súng", "#a855f7", 4000, width=68),
+            "beat": VerticalMeter(monitor, "Nhịp điệu", "#f59e0b", 1.0, "{:.3f}", width=68),
+            "overdrive": VerticalMeter(monitor, "Xung Kick", "#ef4444", 0.6, "{:.3f}", width=68),
+            "left": VerticalMeter(monitor, "Motor Trái", "#34d399", 1.0, "{:.3f}", width=74, height=300),
+            "right": VerticalMeter(monitor, "Motor Phải", "#60a5fa", 1.0, "{:.3f}", width=74, height=300),
+            "lt": VerticalMeter(monitor, "Cò LT (Phanh)", "#10b981", 1.0, "{:.3f}", width=74, height=300),
+            "rt": VerticalMeter(monitor, "Cò RT (Bắn)", "#f43f5e", 1.0, "{:.3f}", width=74, height=300),
         }
         for col, meter in enumerate(self.meters.values()):
-            meter.grid(row=0, column=col, sticky="nsew", padx=5)
+            meter.grid(row=0, column=col, sticky="nsew", padx=4)
 
         log_frame = tk.Frame(right, bg="#0d1118", highlightthickness=1, highlightbackground="#293241")
         log_frame.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
@@ -2252,6 +2278,17 @@ class VibrationApp:
                 else "🔊 Toàn hệ thống Windows (Mặc định)"
             )
 
+        if hasattr(self, "trigger_haptics_var"):
+            self.trigger_haptics_var.set(snap.get("trigger_haptics_enabled", True))
+        if hasattr(self, "trigger_mode_var"):
+            t_mode = snap.get("trigger_mode", "adaptive_gun_brake")
+            if t_mode == "directional_stereo":
+                self.trigger_mode_var.set("🔊 Định hướng Stereo: Trái/Phải theo âm")
+            elif t_mode == "linked_body":
+                self.trigger_mode_var.set("⚡ Đồng bộ toàn dải cùng 2 motor thân")
+            else:
+                self.trigger_mode_var.set("🎯 Tự động tối ưu: RT Bắn / LT Phanh")
+
         if hasattr(self, "apex_enabled_var"):
             self.apex_enabled_var.set(snap["apex_led_enabled"])
             self.apex_mode_var.set(snap["apex_led_mode"])
@@ -2366,20 +2403,23 @@ class VibrationApp:
             if not is_controller_connected(index):
                 self.log_queue.put("Kiểm tra thất bại: Tay cầm chưa được kết nối.")
                 return
-            self.log_queue.put("Bắt đầu kiểm tra rung: Trái (Trầm) -> Phải (Đanh) -> Cả hai (DualSense Kick)")
+            disp = Unified4ChannelDispatcher()
+            self.log_queue.put("Bắt đầu kiểm tra rung: Thân Trái -> Thân Phải -> Cò Phanh LT -> Cò Bắn RT -> Cả 4 Motor")
             pattern = [
-                (0.60, 0.0, 0.22),
-                (0.0, 0.60, 0.22),
-                (0.85, 0.85, 0.30),
-                (0.0, 0.0, 0.05),
+                (0.60, 0.0, 0.0, 0.0, 0.22),
+                (0.0, 0.60, 0.0, 0.0, 0.22),
+                (0.0, 0.0, 0.85, 0.0, 0.25),
+                (0.0, 0.0, 0.0, 0.85, 0.25),
+                (0.85, 0.85, 0.85, 0.85, 0.35),
+                (0.0, 0.0, 0.0, 0.0, 0.05),
             ]
-            for left, right, duration in pattern:
+            for left, right, lt, rt, duration in pattern:
                 if self.stop_event.is_set():
                     break
-                set_vibration(index, left, right)
+                disp.set_vibration_4ch(index, left, right, lt, rt)
                 time.sleep(duration)
-            set_vibration(index, 0, 0)
-            self.log_queue.put("Kiểm tra rung hoàn tất.")
+            disp.stop_all()
+            self.log_queue.put("Kiểm tra rung 4 kênh hoàn tất.")
 
         self.test_thread = threading.Thread(target=run, daemon=True)
         self.test_thread.start()
@@ -2423,6 +2463,10 @@ class VibrationApp:
         self.meters["overdrive"].set(stats.get("overdrive_kick", 0.0))
         self.meters["left"].set(stats["left_output"], stats["peak_left"])
         self.meters["right"].set(stats["right_output"], stats["peak_right"])
+        if "lt" in self.meters:
+            self.meters["lt"].set(stats.get("peak_left_trigger", 0.0), stats.get("peak_left_trigger", 0.0))
+        if "rt" in self.meters:
+            self.meters["rt"].set(stats.get("peak_right_trigger", 0.0), stats.get("peak_right_trigger", 0.0))
 
         while True:
             try:
@@ -2526,6 +2570,25 @@ class VibrationApp:
         with self.shared.lock:
             self.shared.audio_capture_mode = val
         self.log_queue.put(f"Chế độ nguồn thu âm: {self.audio_mode_var.get()}")
+        self.save_settings()
+
+    def set_trigger_haptics(self):
+        with self.shared.lock:
+            self.shared.trigger_haptics_enabled = bool(self.trigger_haptics_var.get())
+        self.log_queue.put(f"Rung 2 nút cò LT/RT: {'🟢 BẬT' if self.trigger_haptics_var.get() else '🔴 TẮT'}")
+        self.save_settings()
+
+    def set_trigger_mode(self):
+        sel = self.trigger_mode_var.get()
+        if "Định hướng Stereo" in sel:
+            val = "directional_stereo"
+        elif "Đồng bộ" in sel:
+            val = "linked_body"
+        else:
+            val = "adaptive_gun_brake"
+        with self.shared.lock:
+            self.shared.trigger_mode = val
+        self.log_queue.put(f"Chế độ rung cò: {sel}")
         self.save_settings()
 
     def open_game_profile_dialog(self):
