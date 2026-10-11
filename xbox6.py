@@ -1,0 +1,1639 @@
+import ctypes
+import json
+import math
+import queue
+import threading
+import time
+import sys
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from tkinter import colorchooser, scrolledtext, ttk
+import tkinter as tk
+from ctypes import wintypes
+
+import numpy as np
+import pyaudiowpatch as pyaudio
+
+
+APP_TITLE = "Xbox Audio Rumble Studio - Chuẩn Haptic DualSense & LED Apex"
+APP_PATH = Path(sys.executable if getattr(sys, "frozen", False) else __file__)
+CONFIG_FILE = APP_PATH.with_suffix(".settings.json")
+XINPUT_SUCCESS = 0
+XINPUT_ERROR_DEVICE_NOT_CONNECTED = 1167
+
+
+class XInputGamepad(ctypes.Structure):
+    _fields_ = [
+        ("wButtons", wintypes.WORD),
+        ("bLeftTrigger", ctypes.c_ubyte),
+        ("bRightTrigger", ctypes.c_ubyte),
+        ("sThumbLX", ctypes.c_short),
+        ("sThumbLY", ctypes.c_short),
+        ("sThumbRX", ctypes.c_short),
+        ("sThumbRY", ctypes.c_short),
+    ]
+
+
+class XInputState(ctypes.Structure):
+    _fields_ = [
+        ("dwPacketNumber", wintypes.DWORD),
+        ("Gamepad", XInputGamepad),
+    ]
+
+
+class XInputVibration(ctypes.Structure):
+    _fields_ = [
+        ("wLeftMotorSpeed", wintypes.WORD),
+        ("wRightMotorSpeed", wintypes.WORD),
+    ]
+
+
+try:
+    xinput = ctypes.WinDLL("xinput1_4")
+except OSError:
+    xinput = ctypes.WinDLL("xinput9_1_0")
+
+XInputSetState = xinput.XInputSetState
+XInputSetState.argtypes = [wintypes.DWORD, ctypes.POINTER(XInputVibration)]
+XInputSetState.restype = wintypes.DWORD
+
+XInputGetState = xinput.XInputGetState
+XInputGetState.argtypes = [wintypes.DWORD, ctypes.POINTER(XInputState)]
+XInputGetState.restype = wintypes.DWORD
+
+XINPUT_GAMEPAD_LEFT_SHOULDER = 0x0100
+XINPUT_GAMEPAD_RIGHT_SHOULDER = 0x0200
+
+
+PRESETS = {
+    "✨ Chuẩn Xúc Giác Haptic DualSense": {
+        "dual_motor_mode": True,
+        "vocal_only_mode": False,
+        "adaptive_threshold": True,
+        "stereo_panning": True,
+        "overdrive_boost": 0.80,
+        "intensity": 0.85,
+        "rhythm_punch": 0.70,
+        "texture_amount": 0.65,
+        "vibration_threshold": 190.0,
+        "map_in_max": 4600.0,
+        "gamma_correction": 1.10,
+        "attack_rate": 0.70,
+        "release_rate": 0.30,
+        "dead_zone": 0.025,
+        "vocal_low": 350,
+        "vocal_high": 5500,
+        "bass_high": 380,
+    },
+    "🎮 Game Bắn Súng (FPS - Sắc Bén)": {
+        "dual_motor_mode": True,
+        "vocal_only_mode": False,
+        "adaptive_threshold": True,
+        "stereo_panning": True,
+        "overdrive_boost": 0.90,
+        "intensity": 0.88,
+        "rhythm_punch": 0.80,
+        "texture_amount": 0.50,
+        "vibration_threshold": 210.0,
+        "map_in_max": 4800.0,
+        "gamma_correction": 1.00,
+        "attack_rate": 0.85,
+        "release_rate": 0.35,
+        "dead_zone": 0.03,
+        "vocal_low": 400,
+        "vocal_high": 6500,
+        "bass_high": 380,
+    },
+    "🏎️ Game Đua Xe (Racing - Tốc Độ)": {
+        "dual_motor_mode": True,
+        "vocal_only_mode": False,
+        "adaptive_threshold": True,
+        "stereo_panning": True,
+        "overdrive_boost": 0.60,
+        "intensity": 0.85,
+        "rhythm_punch": 0.65,
+        "texture_amount": 0.70,
+        "vibration_threshold": 170.0,
+        "map_in_max": 5200.0,
+        "gamma_correction": 0.95,
+        "attack_rate": 0.55,
+        "release_rate": 0.20,
+        "dead_zone": 0.035,
+        "vocal_low": 300,
+        "vocal_high": 5000,
+        "bass_high": 420,
+    },
+    "⚔️ Game Nhập Vai & Hành Động (RPG)": {
+        "dual_motor_mode": True,
+        "vocal_only_mode": False,
+        "adaptive_threshold": True,
+        "stereo_panning": True,
+        "overdrive_boost": 0.75,
+        "intensity": 0.82,
+        "rhythm_punch": 0.75,
+        "texture_amount": 0.60,
+        "vibration_threshold": 200.0,
+        "map_in_max": 5000.0,
+        "gamma_correction": 1.05,
+        "attack_rate": 0.65,
+        "release_rate": 0.25,
+        "dead_zone": 0.035,
+        "vocal_low": 350,
+        "vocal_high": 5500,
+        "bass_high": 380,
+    },
+    "🎵 Âm Nhạc Sôi Động (EDM/Rock)": {
+        "dual_motor_mode": True,
+        "vocal_only_mode": False,
+        "adaptive_threshold": True,
+        "stereo_panning": False,
+        "overdrive_boost": 0.45,
+        "intensity": 0.86,
+        "rhythm_punch": 0.85,
+        "texture_amount": 0.45,
+        "vibration_threshold": 220.0,
+        "map_in_max": 5400.0,
+        "gamma_correction": 1.00,
+        "attack_rate": 0.60,
+        "release_rate": 0.18,
+        "dead_zone": 0.04,
+        "vocal_low": 500,
+        "vocal_high": 4500,
+        "bass_high": 550,
+    },
+    "🎙️ ASMR & Giọng Nói Thì Thầm": {
+        "dual_motor_mode": False,
+        "vocal_only_mode": True,
+        "adaptive_threshold": True,
+        "stereo_panning": False,
+        "overdrive_boost": 0.10,
+        "intensity": 0.52,
+        "rhythm_punch": 0.15,
+        "texture_amount": 0.85,
+        "vibration_threshold": 80.0,
+        "map_in_max": 2400.0,
+        "gamma_correction": 1.65,
+        "attack_rate": 0.22,
+        "release_rate": 0.05,
+        "dead_zone": 0.015,
+        "vocal_low": 450,
+        "vocal_high": 3800,
+        "bass_high": 300,
+    },
+    "🎬 Phim Điện Ảnh & Bom Tấn": {
+        "dual_motor_mode": True,
+        "vocal_only_mode": False,
+        "adaptive_threshold": True,
+        "stereo_panning": True,
+        "overdrive_boost": 0.75,
+        "intensity": 0.90,
+        "rhythm_punch": 0.70,
+        "texture_amount": 0.55,
+        "vibration_threshold": 210.0,
+        "map_in_max": 5600.0,
+        "gamma_correction": 1.05,
+        "attack_rate": 0.58,
+        "release_rate": 0.22,
+        "dead_zone": 0.035,
+        "vocal_low": 350,
+        "vocal_high": 4800,
+        "bass_high": 500,
+    },
+}
+
+# Tương thích ngược với preset cũ
+PRESETS["Âm trầm đắm chìm"] = PRESETS["🏎️ Game Đua Xe (Racing - Tốc Độ)"]
+PRESETS["Giọng hát rõ ràng"] = PRESETS["🎙️ ASMR & Giọng Nói Thì Thầm"]
+PRESETS["Toàn dải uy lực"] = PRESETS["✨ Chuẩn Xúc Giác Haptic DualSense"]
+PRESETS["Nhẹ nhàng tinh tế"] = PRESETS["🎙️ ASMR & Giọng Nói Thì Thầm"]
+PRESETS["人声清晰"] = PRESETS["Giọng hát rõ ràng"]
+PRESETS["低频沉浸"] = PRESETS["Âm trầm đắm chìm"]
+PRESETS["轻柔细腻"] = PRESETS["Nhẹ nhàng tinh tế"]
+PRESETS["全频强劲"] = PRESETS["Toàn dải uy lực"]
+
+
+def hex_to_rgb(hex_str):
+    hex_clean = hex_str.strip().lstrip("#")
+    if len(hex_clean) == 6:
+        try:
+            return (
+                int(hex_clean[0:2], 16),
+                int(hex_clean[2:4], 16),
+                int(hex_clean[4:6], 16),
+            )
+        except ValueError:
+            pass
+    return (0, 180, 255)
+
+
+def rgb_to_hex(r, g, b):
+    return f"#{int(clamp(r, 0, 255)):02x}{int(clamp(g, 0, 255)):02x}{int(clamp(b, 0, 255)):02x}"
+
+
+FLYDIGI_VIDS = ("04b4", "37d7", "2fd8", "0483")
+FLYDIGI_VENDOR_USAGE_PAGES = (0xFFA0, 0xFF00, 0xFF12, 0xFF68)
+
+
+class FlydigiApexController:
+    """Điều khiển trực tiếp phần cứng đèn LED của dòng tay cầm Flydigi Apex (Apex 2, 3, 4, 5) và Vader (Vader 3, 4 Pro)."""
+
+    def __init__(self):
+        self.handle = None
+        self.device_path = None
+        self.is_connected = False
+        self.last_color = None
+        self.last_send_time = 0.0
+        self.last_scan_time = 0.0
+        self.report_length = 32
+        self.lock = threading.Lock()
+        self.kernel32 = ctypes.WinDLL("kernel32")
+        self.hid = ctypes.WinDLL("hid")
+        self.setupapi = ctypes.WinDLL("setupapi")
+        self.connect()
+
+    def connect(self):
+        with self.lock:
+            now = time.monotonic()
+            self.last_scan_time = now
+
+            if self.handle:
+                try:
+                    self.kernel32.CloseHandle(self.handle)
+                except Exception:
+                    pass
+                self.handle = None
+                self.is_connected = False
+
+            class GUID(ctypes.Structure):
+                _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD), ("Data4", ctypes.c_ubyte * 8)]
+
+            class HIDP_CAPS(ctypes.Structure):
+                _fields_ = [
+                    ("Usage", wintypes.WORD), ("UsagePage", wintypes.WORD),
+                    ("InputReportByteLength", wintypes.WORD), ("OutputReportByteLength", wintypes.WORD), ("FeatureReportByteLength", wintypes.WORD),
+                    ("Reserved", wintypes.WORD * 17),
+                    ("NumberLinkCollectionNodes", wintypes.WORD), ("NumberInputButtonCaps", wintypes.WORD), ("NumberInputValueCaps", wintypes.WORD),
+                    ("NumberInputDataIndices", wintypes.WORD), ("NumberOutputButtonCaps", wintypes.WORD), ("NumberOutputValueCaps", wintypes.WORD),
+                    ("NumberOutputDataIndices", wintypes.WORD), ("NumberFeatureButtonCaps", wintypes.WORD), ("NumberFeatureValueCaps", wintypes.WORD),
+                    ("NumberFeatureDataIndices", wintypes.WORD)
+                ]
+
+            hid_guid = GUID()
+            self.hid.HidD_GetHidGuid(ctypes.byref(hid_guid))
+            hdevinfo = self.setupapi.SetupDiGetClassDevsW(ctypes.byref(hid_guid), None, None, 0x12)
+
+            class SP_DEVICE_INTERFACE_DATA(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD), ("InterfaceClassGuid", GUID), ("Flags", wintypes.DWORD), ("Reserved", ctypes.c_void_p)]
+
+            class SP_DEVICE_INTERFACE_DETAIL_DATA_W(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD), ("DevicePath", ctypes.c_wchar * 512)]
+
+            ifda = SP_DEVICE_INTERFACE_DATA()
+            ifda.cbSize = ctypes.sizeof(ifda)
+            index = 0
+            candidate_handles = []
+
+            while self.setupapi.SetupDiEnumDeviceInterfaces(hdevinfo, None, ctypes.byref(hid_guid), index, ctypes.byref(ifda)):
+                detail = SP_DEVICE_INTERFACE_DETAIL_DATA_W()
+                detail.cbSize = 8 if ctypes.sizeof(ctypes.c_void_p) == 8 else 5
+                req = wintypes.DWORD()
+                if self.setupapi.SetupDiGetDeviceInterfaceDetailW(hdevinfo, ctypes.byref(ifda), ctypes.byref(detail), ctypes.sizeof(detail), ctypes.byref(req), None):
+                    p = detail.DevicePath.lower()
+                    if any(vid in p for vid in FLYDIGI_VIDS):
+                        # Thử mở quyền đọc/ghi chia sẻ (0xC0000000), nếu bị khóa chia sẻ thì thử quyền chỉ ghi (0x40000000)
+                        h = self.kernel32.CreateFileW(detail.DevicePath, 0xC0000000, 3, None, 3, 0, None)
+                        if h == -1 or h == 0xFFFFFFFFFFFFFFFF:
+                            h = self.kernel32.CreateFileW(detail.DevicePath, 0x40000000, 3, None, 3, 0, None)
+
+                        if h != -1 and h != 0xFFFFFFFFFFFFFFFF:
+                            preparsed = ctypes.c_void_p()
+                            self.hid.HidD_GetPreparsedData(h, ctypes.byref(preparsed))
+                            caps = HIDP_CAPS()
+                            self.hid.HidP_GetCaps(preparsed, ctypes.byref(caps))
+                            self.hid.HidD_FreePreparsedData(preparsed)
+
+                            is_vendor_page = (caps.UsagePage in FLYDIGI_VENDOR_USAGE_PAGES) or (caps.UsagePage >= 0xFF00)
+                            out_len = caps.OutputReportByteLength
+
+                            if is_vendor_page:
+                                self.handle = h
+                                self.device_path = detail.DevicePath
+                                self.report_length = out_len if out_len > 0 else 32
+                                self.is_connected = True
+                                break
+                            elif out_len >= 32:
+                                candidate_handles.append((h, detail.DevicePath, out_len))
+                            else:
+                                self.kernel32.CloseHandle(h)
+                index += 1
+            self.setupapi.SetupDiDestroyDeviceInfoList(hdevinfo)
+
+            # Nếu chưa có interface vendor chính xác, thử interface dự phòng có output report >= 32
+            if not self.is_connected and candidate_handles:
+                h, dev_path, out_len = candidate_handles[0]
+                self.handle = h
+                self.device_path = dev_path
+                self.report_length = out_len if out_len > 0 else 32
+                self.is_connected = True
+                for other_h, _, _ in candidate_handles[1:]:
+                    try:
+                        self.kernel32.CloseHandle(other_h)
+                    except Exception:
+                        pass
+
+            return self.is_connected
+
+    def set_led(self, r, g, b, brightness=1.0):
+        with self.lock:
+            now = time.monotonic()
+            if not self.is_connected or not self.handle:
+                # Quét lại ngầm tối đa 1 lần mỗi 1.5 giây để tránh giật lag luồng âm thanh
+                if (now - self.last_scan_time) < 1.5:
+                    return False
+                if not self.connect():
+                    return False
+
+            r_val = max(0, min(255, int(r * brightness)))
+            g_val = max(0, min(255, int(g * brightness)))
+            b_val = max(0, min(255, int(b * brightness)))
+            current = (r_val, g_val, b_val)
+            if self.last_color == current and (now - self.last_send_time) < 0.25:
+                return True
+            if (now - self.last_send_time) < 0.030:
+                return True
+
+            cmd = [0x5A, 0xA5, 0xF5, 0x05, r_val, g_val, b_val]
+            checksum = sum(cmd[2:]) & 0xFF
+            cmd.append(checksum)
+            
+            # Gói tin Output Report với Report ID 0x03
+            target_len = max(32, self.report_length)
+            report = bytes([0x03]) + bytes(cmd).ljust(target_len - 1, b"\x00")
+            
+            success = False
+            # 1. Thử gửi trực tiếp qua WriteFile
+            written = wintypes.DWORD()
+            res = self.kernel32.WriteFile(self.handle, report, len(report), ctypes.byref(written), None)
+            if res and written.value > 0:
+                success = True
+            else:
+                # 2. Dự phòng: Dùng HidD_SetOutputReport nếu WriteFile bị Windows chặn
+                try:
+                    res_hid = self.hid.HidD_SetOutputReport(self.handle, report, len(report))
+                    if res_hid:
+                        success = True
+                    else:
+                        # 3. Dự phòng 2: Thử HidD_SetFeature
+                        res_feat = self.hid.HidD_SetFeature(self.handle, report, len(report))
+                        if res_feat:
+                            success = True
+                except Exception:
+                    pass
+
+            if not success:
+                self.is_connected = False
+                return False
+
+            self.last_color = current
+            self.last_send_time = now
+            return True
+
+    def close(self):
+        with self.lock:
+            if self.handle:
+                try:
+                    self.kernel32.CloseHandle(self.handle)
+                except Exception:
+                    pass
+                self.handle = None
+                self.is_connected = False
+
+
+@dataclass
+class RuntimeStats:
+    total_rms: float = 0.0
+    vocal_rms: float = 0.0
+    bass_rms: float = 0.0
+    crisp_rms: float = 0.0
+    left_output: float = 0.0
+    right_output: float = 0.0
+    noise_floor: float = 0.0
+    effective_threshold: float = 0.0
+    device_name: str = "Đang khởi tạo..."
+    controller_connected: bool = False
+    peak_left: float = 0.0
+    peak_right: float = 0.0
+    detected_mode: str = "Đang nhận diện"
+    beat_strength: float = 0.0
+    texture_level: float = 0.0
+    overdrive_kick: float = 0.0
+    stereo_pan: float = 0.0
+    apex_connected: bool = False
+    current_led_hex: str = "#00b4d8"
+
+
+@dataclass
+class SharedVibrationParams:
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+    enabled: bool = True
+    controller_index: int = 0
+    auto_profile: bool = True
+    stereo_panning: bool = True
+    overdrive_boost: float = 0.80
+    rhythm_punch: float = 0.70
+    texture_amount: float = 0.65
+    dual_motor_mode: bool = True
+    vocal_only_mode: bool = False
+    adaptive_threshold: bool = True
+    auto_calibrating: bool = False
+    intensity: float = 0.85
+    vibration_threshold: float = 190.0
+    dead_zone: float = 0.025
+    attack_rate: float = 0.70
+    release_rate: float = 0.30
+    map_in_max: float = 4600.0
+    gamma_correction: float = 1.10
+    vocal_low: int = 350
+    vocal_high: int = 5500
+    bass_high: int = 380
+
+    # Cài đặt LED Apex
+    apex_led_enabled: bool = True
+    apex_led_mode: str = "Đồng bộ âm thanh"
+    apex_reactive_type: str = "Tần số âm thanh (Xanh->Tím->Đỏ)"
+    apex_static_color: str = "#00b4d8"
+    apex_brightness: float = 1.0
+
+    stats: RuntimeStats = field(default_factory=RuntimeStats)
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "enabled": self.enabled,
+                "controller_index": self.controller_index,
+                "auto_profile": self.auto_profile,
+                "stereo_panning": self.stereo_panning,
+                "overdrive_boost": self.overdrive_boost,
+                "rhythm_punch": self.rhythm_punch,
+                "texture_amount": self.texture_amount,
+                "dual_motor_mode": self.dual_motor_mode,
+                "vocal_only_mode": self.vocal_only_mode,
+                "adaptive_threshold": self.adaptive_threshold,
+                "auto_calibrating": self.auto_calibrating,
+                "intensity": self.intensity,
+                "vibration_threshold": self.vibration_threshold,
+                "dead_zone": self.dead_zone,
+                "attack_rate": self.attack_rate,
+                "release_rate": self.release_rate,
+                "map_in_max": self.map_in_max,
+                "gamma_correction": self.gamma_correction,
+                "vocal_low": self.vocal_low,
+                "vocal_high": self.vocal_high,
+                "bass_high": self.bass_high,
+                "apex_led_enabled": self.apex_led_enabled,
+                "apex_led_mode": self.apex_led_mode,
+                "apex_reactive_type": self.apex_reactive_type,
+                "apex_static_color": self.apex_static_color,
+                "apex_brightness": self.apex_brightness,
+                "stats": asdict(self.stats),
+            }
+
+    def apply(self, values):
+        with self.lock:
+            for key, value in values.items():
+                if hasattr(self, key) and key not in {"lock", "stats"}:
+                    setattr(self, key, value)
+
+
+def clamp(value, low=0.0, high=1.0):
+    return max(low, min(high, value))
+
+
+def set_vibration(user_index, left_motor, right_motor):
+    vibration = XInputVibration(
+        int(clamp(left_motor) * 65535),
+        int(clamp(right_motor) * 65535),
+    )
+    return XInputSetState(int(user_index), ctypes.byref(vibration))
+
+
+def is_controller_connected(index):
+    state = XInputState()
+    return XInputGetState(int(index), ctypes.byref(state)) == XINPUT_SUCCESS
+
+
+def smooth_signal(current, target, attack, release):
+    rate = attack if target > current else release
+    return current + (target - current) * clamp(rate)
+
+
+def map_value_gamma(value, threshold, in_max, gamma):
+    if value <= threshold:
+        return 0.0
+    span = max(1.0, in_max - threshold)
+    normalized = clamp((value - threshold) / span)
+    return normalized ** max(0.1, gamma)
+
+
+def band_rms(fft_data, freqs, low, high, n):
+    mask = (freqs >= low) & (freqs <= high)
+    if not np.any(mask):
+        return 0.0
+    band_fft = np.zeros_like(fft_data)
+    band_fft[mask] = fft_data[mask]
+    return float(np.sqrt(np.mean(np.square(np.fft.irfft(band_fft, n=n))) + 1e-10))
+
+
+def classify_content(total_rms, vocal_rms, bass_rms, crisp_rms, transient, previous_mode):
+    if total_rms < 50:
+        return "Yên tĩnh"
+
+    total = max(total_rms, 1.0)
+    bass_ratio = bass_rms / total
+    vocal_ratio = vocal_rms / total
+    crisp_ratio = crisp_rms / total
+
+    game_score = transient * 2.2 + crisp_ratio * 1.5 + bass_ratio * 1.2
+    music_score = bass_ratio * 1.4 + transient * 1.1 + vocal_ratio * 0.4
+    asmr_score = vocal_ratio * 1.6 + (1.0 - min(transient * 2.5, 1.0)) * 0.7 - bass_ratio * 0.6
+
+    if previous_mode == "Game Haptic":
+        game_score += 0.15
+    elif previous_mode in {"Nhạc", "音乐"}:
+        music_score += 0.12
+    elif previous_mode == "ASMR":
+        asmr_score += 0.12
+
+    if game_score > music_score + 0.25 and game_score > asmr_score + 0.25:
+        return "Game Haptic"
+    if music_score > asmr_score + 0.15:
+        return "Nhạc"
+    if asmr_score > music_score + 0.10:
+        return "ASMR"
+    return previous_mode if previous_mode in {"Game Haptic", "Nhạc", "ASMR"} else "Game Haptic"
+
+
+def find_loopback_device(audio, log_queue):
+    loopback_devices = []
+    for i in range(audio.get_device_count()):
+        info = audio.get_device_info_by_index(i)
+        if info.get("isLoopbackDevice", False):
+            loopback_devices.append(info)
+
+    try:
+        wasapi_info = audio.get_host_api_info_by_type(pyaudio.paWASAPI)
+        default_speakers = audio.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
+        for dev in loopback_devices:
+            if dev["name"].startswith(default_speakers["name"]):
+                return dev
+    except Exception as exc:
+        log_queue.put(f"Lỗi khi tìm thiết bị loopback mặc định: {exc}")
+
+    if loopback_devices:
+        return loopback_devices[0]
+
+    for i in range(audio.get_device_count()):
+        info = audio.get_device_info_by_index(i)
+        if info.get("maxInputChannels", 0) > 0:
+            return info
+    return None
+
+
+def audio_vibration_thread(shared, log_queue, stop_event):
+    audio = pyaudio.PyAudio()
+    stream = None
+    chunk = 1024
+
+    left_vib = 0.0
+    right_vib = 0.0
+    prev_target_left = 0.0
+    prev_target_right = 0.0
+    energy_avg = 100.0
+    transient_avg = 0.0
+    noise_floor = 40.0
+    calibration_until = 0.0
+    last_hotkey_pressed = False
+    detected_mode = "Game Haptic"
+
+    apex_ctrl = FlydigiApexController()
+    last_apex_state = apex_ctrl.is_connected
+    if apex_ctrl.is_connected:
+        log_queue.put("🟢 Đã phát hiện và kết nối thành công tay cầm Flydigi Apex (Hỗ trợ LED RGB)")
+    else:
+        log_queue.put("⚪ Đang quét tìm tay cầm Flydigi Apex / Dongle USB...")
+
+    try:
+        loopback_device = find_loopback_device(audio, log_queue)
+        if not loopback_device:
+            log_queue.put("Không tìm thấy thiết bị âm thanh phù hợp để thu âm.")
+            return
+
+        channels = int(loopback_device["maxInputChannels"])
+        rate = int(loopback_device["defaultSampleRate"])
+        with shared.lock:
+            shared.stats.device_name = loopback_device["name"]
+            shared.stats.effective_threshold = shared.vibration_threshold
+
+        stream = audio.open(
+            format=pyaudio.paInt16,
+            channels=channels,
+            rate=rate,
+            input=True,
+            input_device_index=loopback_device["index"],
+            frames_per_buffer=chunk,
+        )
+        log_queue.put(f"Đã bắt đầu thu âm: {loopback_device['name']} / {rate} Hz / {channels} kênh (Haptic Ready)")
+
+        while not stop_event.is_set():
+            snap = shared.snapshot()
+            controller_index = snap["controller_index"]
+            state = XInputState()
+            connected = XInputGetState(controller_index, ctypes.byref(state)) == XINPUT_SUCCESS
+
+            if connected:
+                hotkey_pressed = bool(
+                    state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER
+                    and state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER
+                )
+                if hotkey_pressed and not last_hotkey_pressed:
+                    with shared.lock:
+                        shared.enabled = not shared.enabled
+                        snap["enabled"] = shared.enabled
+                    log_queue.put(f"Phím tắt tay cầm LB+RB: Độ rung {'BẬT' if snap['enabled'] else 'TẠM DỪNG'}")
+                last_hotkey_pressed = hotkey_pressed
+            else:
+                last_hotkey_pressed = False
+
+            if snap["auto_calibrating"] and calibration_until == 0:
+                calibration_until = time.monotonic() + 3.0
+                noise_floor = 0.0
+                log_queue.put("Bắt đầu tự động hiệu chuẩn: Vui lòng giữ âm lượng nền ổn định trong 3 giây.")
+
+            try:
+                raw = stream.read(chunk, exception_on_overflow=False)
+            except Exception as exc:
+                log_queue.put(f"Lỗi đọc luồng âm thanh, đang thử lại: {exc}")
+                time.sleep(0.05)
+                continue
+
+            raw_samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+
+            # Xử lý Stereo không gian
+            stereo_pan = 0.0
+            if channels >= 2:
+                samples_2d = raw_samples.reshape(-1, channels)
+                ch_left = samples_2d[:, 0]
+                ch_right = samples_2d[:, 1]
+                samples_mono = (ch_left + ch_right) * 0.5
+
+                rms_l = float(np.sqrt(np.mean(np.square(ch_left)) + 1e-10))
+                rms_r = float(np.sqrt(np.mean(np.square(ch_right)) + 1e-10))
+                total_stereo = rms_l + rms_r
+                if total_stereo > 35.0:
+                    stereo_pan = float(np.clip((rms_r - rms_l) / total_stereo, -1.0, 1.0))
+            else:
+                samples_mono = raw_samples
+
+            n = len(samples_mono)
+            fft_data = np.fft.rfft(samples_mono)
+            freqs = np.fft.rfftfreq(n, 1 / rate)
+
+            # 3 Dải tần âm thanh trọng tâm cho Haptics
+            bass_rms = band_rms(fft_data, freqs, 20, snap["bass_high"], n)
+            vocal_rms = band_rms(fft_data, freqs, snap["vocal_low"], snap["vocal_high"], n)
+            crisp_rms = band_rms(fft_data, freqs, 1400, min(7500, rate / 2), n)
+
+            total_rms = float(np.sqrt(np.mean(np.square(samples_mono)) + 1e-10))
+            energy_avg = energy_avg * 0.95 + total_rms * 0.05
+            transient = clamp((total_rms - energy_avg) / max(energy_avg, 70.0), 0.0, 1.0)
+            transient_avg = transient_avg * 0.78 + transient * 0.22
+
+            if snap["auto_calibrating"]:
+                noise_floor = max(noise_floor * 0.97, total_rms, vocal_rms)
+                if time.monotonic() >= calibration_until:
+                    calibrated = max(110.0, noise_floor * 1.65)
+                    with shared.lock:
+                        shared.vibration_threshold = calibrated
+                        shared.auto_calibrating = False
+                    calibration_until = 0.0
+                    log_queue.put(f"Tự động hiệu chuẩn hoàn tất: Ngưỡng kích hoạt {calibrated:.1f}")
+            else:
+                calibration_until = 0.0
+                noise_floor = noise_floor * 0.995 + min(total_rms, vocal_rms) * 0.005
+
+            detected_mode = classify_content(total_rms, vocal_rms, bass_rms, crisp_rms, transient_avg, detected_mode)
+
+            effective = {
+                "dual_motor_mode": snap["dual_motor_mode"],
+                "vocal_only_mode": snap["vocal_only_mode"],
+                "adaptive_threshold": snap["adaptive_threshold"],
+                "stereo_panning": snap["stereo_panning"],
+                "overdrive_boost": snap["overdrive_boost"],
+                "intensity": snap["intensity"],
+                "vibration_threshold": snap["vibration_threshold"],
+                "dead_zone": snap["dead_zone"],
+                "attack_rate": snap["attack_rate"],
+                "release_rate": snap["release_rate"],
+                "map_in_max": snap["map_in_max"],
+                "gamma_correction": snap["gamma_correction"],
+            }
+
+            adaptive_floor = noise_floor * 1.5 if effective["adaptive_threshold"] else 0.0
+            threshold = max(effective["vibration_threshold"], adaptive_floor)
+
+            def calc_vibration(rms):
+                value = map_value_gamma(rms, threshold, effective["map_in_max"], effective["gamma_correction"])
+                return clamp(value * effective["intensity"])
+
+            # Motor Trái = Nặng (Trầm), Motor Phải = Nhẹ (Đanh/Súng)
+            if effective["dual_motor_mode"]:
+                target_left = calc_vibration(bass_rms * 1.15)
+                target_right = calc_vibration(crisp_rms * 1.25 + vocal_rms * 0.55)
+            else:
+                source = vocal_rms if effective["vocal_only_mode"] else total_rms
+                target_left = target_right = calc_vibration(source)
+
+            beat_pulse = 0.0
+            texture_level = 0.0
+            now = time.monotonic()
+
+            if snap["auto_profile"] and detected_mode in {"Game Haptic", "Nhạc", "音乐"}:
+                beat_pulse = transient_avg * snap["rhythm_punch"] * snap["intensity"]
+                target_left = clamp(target_left + beat_pulse * 0.65)
+                target_right = clamp(target_right + beat_pulse * 0.40)
+            elif snap["auto_profile"] and detected_mode == "ASMR":
+                breath_envelope = clamp((vocal_rms - noise_floor * 0.85) / max(900.0, threshold * 4.0))
+                micro_wave = 0.55 + 0.45 * math.sin(now * 2 * math.pi * 34.0)
+                texture_level = breath_envelope * snap["texture_amount"] * 0.075 * micro_wave
+                target_left = clamp(target_left + texture_level * 0.5)
+                target_right = clamp(target_right + texture_level * 1.0)
+
+            # Định vị Stereo
+            if effective["stereo_panning"] and abs(stereo_pan) > 0.08:
+                pan_mag = abs(stereo_pan)
+                if stereo_pan < 0:
+                    target_left = clamp(target_left * (1.0 + pan_mag * 0.40))
+                    target_right = clamp(target_right * max(0.20, 1.0 - pan_mag * 0.70))
+                else:
+                    target_right = clamp(target_right * (1.0 + pan_mag * 0.40))
+                    target_left = clamp(target_left * max(0.20, 1.0 - pan_mag * 0.70))
+
+            # Overdrive Kick
+            overdrive_kick_val = 0.0
+            if effective["overdrive_boost"] > 0:
+                delta_l = target_left - prev_target_left
+                delta_r = target_right - prev_target_right
+                boost = effective["overdrive_boost"] * 1.35
+                if delta_l > 0.10:
+                    kick_l = delta_l * boost
+                    target_left = clamp(target_left + kick_l)
+                    overdrive_kick_val = max(overdrive_kick_val, kick_l)
+                if delta_r > 0.10:
+                    kick_r = delta_r * boost
+                    target_right = clamp(target_right + kick_r)
+                    overdrive_kick_val = max(overdrive_kick_val, kick_r)
+
+            prev_target_left = target_left
+            prev_target_right = target_right
+
+            # Active Braking
+            rel_l = effective["release_rate"]
+            rel_r = effective["release_rate"]
+            if target_left < left_vib * 0.55:
+                rel_l = max(rel_l, 0.38)
+            if target_right < right_vib * 0.55:
+                rel_r = max(rel_r, 0.38)
+
+            left_vib = smooth_signal(left_vib, target_left, effective["attack_rate"], rel_l)
+            right_vib = smooth_signal(right_vib, target_right, effective["attack_rate"], rel_r)
+
+            if left_vib < effective["dead_zone"]:
+                left_vib = 0.0
+            if right_vib < effective["dead_zone"]:
+                right_vib = 0.0
+
+            if snap["enabled"] and connected:
+                set_vibration(controller_index, left_vib, right_vib)
+            else:
+                set_vibration(controller_index, 0, 0)
+                if not snap["enabled"]:
+                    left_vib = right_vib = 0.0
+
+            # Xử lý màu Đèn LED Apex
+            cur_led_hex = "#151b24"
+            if snap["apex_led_enabled"]:
+                mode = snap["apex_led_mode"]
+                bright = snap["apex_brightness"]
+                if mode == "Màu tĩnh":
+                    br, bg, bb = hex_to_rgb(snap["apex_static_color"])
+                    r = int(clamp(br * bright, 0, 255))
+                    g = int(clamp(bg * bright, 0, 255))
+                    b = int(clamp(bb * bright, 0, 255))
+                else:
+                    # Đồng bộ âm thanh (Audio Reactive)
+                    if snap["apex_reactive_type"] == "Nhịp đập độ sáng (Pulse)":
+                        br, bg, bb = hex_to_rgb(snap["apex_static_color"])
+                        vib_level = max(left_vib, right_vib, beat_pulse)
+                        dyn_bright = clamp(max(0.12, vib_level) * bright)
+                        r = int(br * dyn_bright)
+                        g = int(bg * dyn_bright)
+                        b = int(bb * dyn_bright)
+                    else:
+                        # Tần số âm thanh (Xanh -> Tím -> Đỏ)
+                        impact = clamp(max(left_vib, beat_pulse))
+                        energy = clamp(total_rms / 3200.0)
+                        crisp_act = clamp(right_vib)
+                        if impact > 0.40:
+                            # Chấn động mạnh / Nổ lớn / Bass -> Đỏ rực rỡ / Cam cháy
+                            blend = clamp((impact - 0.40) / 0.60)
+                            r = int(210 + 45 * blend)
+                            g = int(50 * (1 - blend))
+                            b = int(220 * (1 - blend))
+                        elif energy > 0.15 or crisp_act > 0.20:
+                            # Nhịp vừa / Súng bắn / Bước chân -> Tím / Magenta
+                            blend = clamp(max(energy, crisp_act))
+                            r = int(10 + 190 * blend)
+                            g = int(170 * (1 - blend * 0.7))
+                            b = 255
+                        else:
+                            # Âm thanh êm dịu -> Xanh ngọc Cyan
+                            r = 0
+                            g = int(160 * max(0.18, energy))
+                            b = int(230 * max(0.25, energy))
+
+                        r = int(clamp(r * bright, 0, 255))
+                        g = int(clamp(g * bright, 0, 255))
+                        b = int(clamp(b * bright, 0, 255))
+
+                apex_ctrl.set_led(r, g, b)
+                cur_led_hex = rgb_to_hex(r, g, b)
+
+            if apex_ctrl.is_connected != last_apex_state:
+                last_apex_state = apex_ctrl.is_connected
+                if last_apex_state:
+                    log_queue.put("🟢 Đã kết nối thành công tay cầm Flydigi Apex (Đèn LED RGB sẵn sàng)")
+                else:
+                    log_queue.put("⚪ Tay cầm Flydigi Apex đã ngắt kết nối. Đang tiếp tục quét...")
+
+            with shared.lock:
+                shared.stats.total_rms = total_rms
+                shared.stats.vocal_rms = vocal_rms
+                shared.stats.bass_rms = bass_rms
+                shared.stats.crisp_rms = crisp_rms
+                shared.stats.left_output = left_vib
+                shared.stats.right_output = right_vib
+                shared.stats.noise_floor = noise_floor
+                shared.stats.effective_threshold = threshold
+                shared.stats.controller_connected = connected
+                shared.stats.peak_left = max(shared.stats.peak_left * 0.985, left_vib)
+                shared.stats.peak_right = max(shared.stats.peak_right * 0.985, right_vib)
+                shared.stats.detected_mode = detected_mode
+                shared.stats.beat_strength = beat_pulse
+                shared.stats.texture_level = texture_level
+                shared.stats.overdrive_kick = overdrive_kick_val
+                shared.stats.stereo_pan = stereo_pan
+                shared.stats.apex_connected = apex_ctrl.is_connected
+                shared.stats.current_led_hex = cur_led_hex
+
+            time.sleep(0.002)
+    except Exception as exc:
+        log_queue.put(f"Lỗi runtime: {exc}")
+    finally:
+        snap = shared.snapshot()
+        set_vibration(snap["controller_index"], 0, 0)
+        apex_ctrl.close()
+        if stream is not None:
+            stream.close()
+        audio.terminate()
+        log_queue.put("Đã dừng luồng âm thanh, độ rung tay cầm đã tắt.")
+
+
+class VerticalMeter(tk.Frame):
+    def __init__(
+        self,
+        parent,
+        label,
+        color,
+        max_value,
+        value_format="{:.0f}",
+        width=82,
+        height=260,
+        **kwargs,
+    ):
+        super().__init__(parent, bg="#151b24", **kwargs)
+        self.max_value = max_value
+        self.color = color
+        self.value_format = value_format
+        self.height = height
+        self.width = width
+
+        self.value_label = tk.Label(
+            self,
+            text=value_format.format(0),
+            bg="#151b24",
+            fg="#f8fafc",
+            font=("Consolas", 12, "bold"),
+        )
+        self.value_label.pack(fill="x", pady=(0, 8))
+
+        self.canvas = tk.Canvas(
+            self,
+            width=width,
+            height=height,
+            bg="#0d1118",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground="#293241",
+        )
+        self.canvas.pack()
+        self.track = self.canvas.create_rectangle(18, 12, width - 18, height - 12, fill="#202938", outline="")
+        self.fill = self.canvas.create_rectangle(18, height - 12, width - 18, height - 12, fill=color, outline="")
+        self.peak = self.canvas.create_line(13, height - 12, width - 13, height - 12, fill="#f8fafc", width=2)
+        for i in range(1, 5):
+            y = 12 + (height - 24) * i / 5
+            self.canvas.create_line(18, y, width - 18, y, fill="#2c3748")
+
+        tk.Label(
+            self,
+            text=label,
+            bg="#151b24",
+            fg="#cbd5e1",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(fill="x", pady=(9, 0))
+
+    def set(self, value, peak=None):
+        ratio = clamp(value / max(1e-6, self.max_value))
+        top = 12 + (self.height - 24) * (1 - ratio)
+        bottom = self.height - 12
+        self.canvas.coords(self.fill, 18, top, self.width - 18, bottom)
+        if peak is not None:
+            peak_ratio = clamp(peak / max(1e-6, self.max_value))
+            peak_y = 12 + (self.height - 24) * (1 - peak_ratio)
+            self.canvas.coords(self.peak, 13, peak_y, self.width - 13, peak_y)
+        self.value_label.config(text=self.value_format.format(value))
+
+
+class VibrationApp:
+    def __init__(self, master):
+        self.master = master
+        self.shared = SharedVibrationParams()
+        self.log_queue = queue.Queue()
+        self.stop_event = threading.Event()
+        self.audio_thread = None
+        self.test_thread = None
+
+        self.configure_window()
+        self.load_settings()
+        self.create_widgets()
+        self.sync_controls_from_params()
+        self.start_engine()
+        self.master.bind_all("<F9>", lambda _e: self.toggle_vibration())
+        self.update_gui()
+
+    def configure_window(self):
+        self.master.title(APP_TITLE)
+        self.master.geometry("1120x800")
+        self.master.minsize(1020, 720)
+        try:
+            self.master.state("zoomed")
+        except Exception:
+            pass
+        self.master.configure(bg="#0b0f16")
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(".", font=("Segoe UI", 9), background="#111827", foreground="#dbe4ef")
+        style.configure("Dark.TFrame", background="#0b0f16")
+        style.configure("Panel.TFrame", background="#151b24")
+        style.configure("TLabel", background="#151b24", foreground="#dbe4ef")
+        style.configure("Muted.TLabel", background="#151b24", foreground="#8fa3b8")
+        style.configure("Value.TLabel", background="#151b24", foreground="#f8fafc", font=("Consolas", 10, "bold"))
+        style.configure("TCheckbutton", background="#151b24", foreground="#dbe4ef")
+        style.map("TCheckbutton", background=[("active", "#151b24")], foreground=[("active", "#ffffff")])
+        style.configure("TButton", background="#233044", foreground="#f8fafc", borderwidth=0, padding=(12, 7))
+        style.map("TButton", background=[("active", "#314158"), ("pressed", "#1f2937")])
+        style.configure("Accent.TButton", background="#2563eb", foreground="#ffffff", font=("Segoe UI", 9, "bold"))
+        style.map("Accent.TButton", background=[("active", "#1d4ed8"), ("pressed", "#1e40af")])
+        style.configure("TCombobox", fieldbackground="#0f1622", background="#233044", foreground="#f8fafc", arrowcolor="#f8fafc")
+        style.configure("Horizontal.TScale", background="#151b24", troughcolor="#293241")
+
+    def load_settings(self):
+        if not CONFIG_FILE.exists():
+            return
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            self.shared.apply(data)
+        except Exception as exc:
+            self.log_queue.put(f"Không thể đọc cài đặt, đã dùng giá trị mặc định: {exc}")
+
+    def save_settings(self):
+        snap = self.shared.snapshot()
+        data = {k: v for k, v in snap.items() if k != "stats"}
+        try:
+            CONFIG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            self.log_queue.put(f"Không thể lưu cài đặt: {exc}")
+
+    def create_widgets(self):
+        shell = tk.Frame(self.master, bg="#0b0f16")
+        shell.pack(fill="both", expand=True, padx=16, pady=16)
+        shell.columnconfigure(0, minsize=430)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(1, weight=1)
+
+        header = tk.Frame(shell, bg="#0b0f16")
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 14))
+        tk.Label(
+            header,
+            text="🎮 Bảng Điều Khiển Xúc Giác Haptic DualSense & LED Apex",
+            bg="#0b0f16",
+            fg="#f8fafc",
+            font=("Segoe UI", 18, "bold"),
+        ).pack(side="left")
+        self.status_label = tk.Label(
+            header,
+            text="Đang khởi động...",
+            bg="#122037",
+            fg="#c7d2fe",
+            font=("Segoe UI", 10, "bold"),
+            padx=14,
+            pady=8,
+        )
+        self.status_label.pack(side="right")
+
+        self.master_power_btn = tk.Button(
+            header,
+            text="🟢 RUNG: ĐANG BẬT (F9)",
+            bg="#15803d",
+            activebackground="#16a34a",
+            fg="#ffffff",
+            activeforeground="#ffffff",
+            font=("Segoe UI", 10, "bold"),
+            padx=16,
+            pady=6,
+            relief="flat",
+            cursor="hand2",
+            command=self.toggle_vibration,
+        )
+        self.master_power_btn.pack(side="right", padx=(0, 10))
+
+        left = tk.Frame(shell, bg="#0b0f16")
+        left.grid(row=1, column=0, sticky="nsew", padx=(0, 14))
+        left.columnconfigure(0, weight=1)
+
+        right = tk.Frame(shell, bg="#151b24", highlightthickness=1, highlightbackground="#293241")
+        right.grid(row=1, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
+
+        # 1. Panel Thiết bị & Cấu hình Preset
+        device_box, device_panel = self.make_panel(left, "Thiết bị & Cấu hình Preset")
+        device_box.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        device_panel.columnconfigure(1, weight=1)
+
+        ttk.Label(device_panel, text="Tay cầm").grid(row=0, column=0, sticky="w")
+        self.controller_var = tk.StringVar(value="0")
+        self.controller_box = ttk.Combobox(
+            device_panel,
+            textvariable=self.controller_var,
+            values=["0", "1", "2", "3"],
+            width=8,
+            state="readonly",
+        )
+        self.controller_box.grid(row=0, column=1, sticky="w", padx=(10, 0))
+        self.controller_box.bind("<<ComboboxSelected>>", lambda _e: self.set_controller())
+
+        ttk.Label(device_panel, text="Cấu hình").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        preset_row = tk.Frame(device_panel, bg="#151b24")
+        preset_row.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+        preset_row.columnconfigure(0, weight=1)
+
+        self.preset_var = tk.StringVar(value="✨ Chuẩn Xúc Giác Haptic DualSense")
+        preset_keys = [k for k in PRESETS.keys() if not any(c in k for c in ["人声", "低频", "轻柔", "全频"])]
+        self.preset_combo = ttk.Combobox(
+            preset_row,
+            textvariable=self.preset_var,
+            values=preset_keys,
+            state="readonly",
+        )
+        self.preset_combo.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.preset_combo.bind("<<ComboboxSelected>>", lambda _e: self.apply_preset())
+        ttk.Button(preset_row, text="Áp dụng", command=self.apply_preset, width=8).grid(row=0, column=1)
+
+        ttk.Label(device_panel, text="Chiến lược").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.profile_label = ttk.Label(device_panel, text="Tự động nhận diện Haptic", style="Value.TLabel")
+        self.profile_label.grid(row=2, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+
+        button_row = tk.Frame(device_panel, bg="#151b24")
+        button_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        button_row.columnconfigure((0, 1), weight=1)
+        ttk.Button(button_row, text="⚡ Tự động hiệu chuẩn", command=self.start_calibration, style="Accent.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(button_row, text="🎮 Kiểm tra rung", command=self.test_vibration).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        self.device_label = ttk.Label(device_panel, text="Nguồn âm thanh: Đang khởi tạo...", style="Muted.TLabel", wraplength=380)
+        self.device_label.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+
+        # 2. Panel Chế độ & Xử lý Nâng cao
+        mode_box, mode = self.make_panel(left, "Chế độ & Xử lý Âm thanh Không gian")
+        mode_box.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        mode.columnconfigure(0, weight=1)
+
+        self.enabled_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(mode, text="Bật phản hồi xúc giác rung (Master)", variable=self.enabled_var, command=self.set_enabled).grid(row=0, column=0, sticky="w")
+
+        self.auto_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(mode, text="Chế độ tự động nhận diện (Game / Nhạc / ASMR)", variable=self.auto_var, command=self.set_auto_profile).grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        self.stereo_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(mode, text="Định vị Stereo không gian (Tiếng súng/nổ bên nào rung bên đó)", variable=self.stereo_var, command=self.set_stereo).grid(row=2, column=0, sticky="w", pady=(6, 0))
+
+        self.dual_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(mode, text="Tách 2 Motor chuẩn phần cứng (Trái: Trầm/Nổ - Phải: Súng/Đanh)", variable=self.dual_var, command=self.set_dual_motor).grid(row=3, column=0, sticky="w", pady=(6, 0))
+
+        # 3. Panel Đèn LED RGB Apex (Flydigi)
+        apex_box, apex_panel = self.make_panel(left, "Đèn LED RGB Tay Cầm Apex (Flydigi)")
+        apex_box.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        apex_panel.columnconfigure(1, weight=1)
+
+        # Hàng 0: Bật/tắt LED Apex & Trạng thái kết nối
+        led_header = tk.Frame(apex_panel, bg="#151b24")
+        led_header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        led_header.columnconfigure(1, weight=1)
+
+        self.apex_enabled_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(led_header, text="Bật LED Apex", variable=self.apex_enabled_var, command=self.set_apex_params).grid(row=0, column=0, sticky="w")
+        self.apex_status_label = tk.Label(
+            led_header,
+            text="Đang quét tay cầm Apex...",
+            bg="#151b24",
+            fg="#38bdf8",
+            font=("Segoe UI", 9, "bold"),
+        )
+        self.apex_status_label.grid(row=0, column=1, sticky="e")
+
+        # Hàng 1: Chế độ LED
+        ttk.Label(apex_panel, text="Chế độ").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.apex_mode_var = tk.StringVar(value="Đồng bộ âm thanh")
+        self.apex_mode_combo = ttk.Combobox(
+            apex_panel,
+            textvariable=self.apex_mode_var,
+            values=["Đồng bộ âm thanh", "Màu tĩnh"],
+            state="readonly",
+        )
+        self.apex_mode_combo.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(4, 0))
+        self.apex_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self.set_apex_params())
+
+        # Hàng 2: Kiểu hiệu ứng Audio Reactive
+        ttk.Label(apex_panel, text="Hiệu ứng").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.apex_style_var = tk.StringVar(value="Tần số âm thanh (Xanh->Tím->Đỏ)")
+        self.apex_style_combo = ttk.Combobox(
+            apex_panel,
+            textvariable=self.apex_style_var,
+            values=["Tần số âm thanh (Xanh->Tím->Đỏ)", "Nhịp đập độ sáng (Pulse)"],
+            state="readonly",
+        )
+        self.apex_style_combo.grid(row=2, column=1, sticky="ew", padx=(10, 0), pady=(6, 0))
+        self.apex_style_combo.bind("<<ComboboxSelected>>", lambda _e: self.set_apex_params())
+
+        # Hàng 3: Bảng màu nhanh
+        ttk.Label(apex_panel, text="Bảng màu").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        palette_frame = tk.Frame(apex_panel, bg="#151b24")
+        palette_frame.grid(row=3, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+        palette_colors = [
+            ("#ef4444", "Đỏ"),
+            ("#f97316", "Cam"),
+            ("#eab308", "Vàng"),
+            ("#22c55e", "Lục"),
+            ("#06b6d4", "Lam"),
+            ("#a855f7", "Tím"),
+            ("#ec4899", "Hồng"),
+            ("#f8fafc", "Trắng"),
+        ]
+        for c_hex, c_name in palette_colors:
+            btn = tk.Button(
+                palette_frame,
+                bg=c_hex,
+                activebackground=c_hex,
+                width=2,
+                height=1,
+                relief="flat",
+                bd=0,
+                cursor="hand2",
+                command=lambda col=c_hex: self.select_palette_color(col),
+            )
+            btn.pack(side="left", padx=2)
+
+        ttk.Button(palette_frame, text="🎨 Khác...", command=self.pick_custom_color, width=7).pack(side="left", padx=(6, 0))
+
+        # Hàng 4: Thanh trượt độ sáng LED
+        ttk.Label(apex_panel, text="Độ sáng", style="Muted.TLabel").grid(row=4, column=0, sticky="w", pady=(8, 0))
+        self.apex_bright_label = ttk.Label(apex_panel, text="100%", width=8, style="Value.TLabel")
+        self.apex_bright_label.grid(row=4, column=2, sticky="e", padx=(6, 0), pady=(8, 0))
+        self.apex_bright_scale = ttk.Scale(
+            apex_panel,
+            from_=0.1,
+            to=1.0,
+            orient="horizontal",
+            command=self.set_apex_brightness_scale,
+        )
+        self.apex_bright_scale.grid(row=4, column=1, sticky="ew", padx=(10, 8), pady=(8, 0))
+
+        # Hàng 5: Ô đèn LED ảo trực quan (Preview)
+        preview_frame = tk.Frame(apex_panel, bg="#0d1118", bd=1, relief="solid")
+        preview_frame.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        preview_frame.columnconfigure(1, weight=1)
+
+        tk.Label(
+            preview_frame,
+            text="Đèn LED tay cầm thực tế:",
+            bg="#0d1118",
+            fg="#94a3b8",
+            font=("Segoe UI", 9),
+            padx=8,
+            pady=4,
+        ).grid(row=0, column=0, sticky="w")
+        self.led_preview_canvas = tk.Canvas(
+            preview_frame,
+            height=20,
+            width=180,
+            bg="#0d1118",
+            highlightthickness=0,
+        )
+        self.led_preview_canvas.grid(row=0, column=1, sticky="e", padx=8, pady=4)
+        self.led_preview_bar = self.led_preview_canvas.create_rectangle(4, 3, 176, 17, fill="#00b4d8", outline="#f8fafc", width=1)
+
+        # 4. Panel Độ rung & Cảm giác
+        controls_box, controls = self.make_panel(left, "Độ rung & Tinh chỉnh Xúc giác")
+        controls_box.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+        controls.columnconfigure(1, weight=1)
+
+        self.sliders = {}
+        slider_specs = [
+            ("Cường độ tổng thể", "intensity", 0.1, 1.0, "{:.2f}", False, "Giới hạn lực rung tối đa của tay cầm."),
+            ("Overdrive Kick (Triệt trễ)", "overdrive_boost", 0.0, 1.0, "{:.2f}", False, "Xung kích tốc tức thì khi có tiếng súng/nổ, khắc phục độ ì của motor."),
+            ("Lực nhịp điệu (Punch)", "rhythm_punch", 0.0, 1.0, "{:.2f}", False, "Độ nảy uy lực theo tiếng trống, tiếng nổ và dập cơ học."),
+            ("Độ tê chi tiết (Texture)", "texture_amount", 0.0, 1.0, "{:.2f}", False, "Độ tê mịn tần số cao (bước chân, cạ kim loại, hơi thở)."),
+        ]
+        for row, spec in enumerate(slider_specs):
+            self.add_slider(controls, row, *spec)
+
+        # Phần hiển thị bên phải: Các thanh đo thời gian thực
+        monitor_header = tk.Frame(right, bg="#151b24")
+        monitor_header.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 4))
+        tk.Label(
+            monitor_header,
+            text="Phổ Đo Xúc Giác & Motor Thời Gian Thực",
+            bg="#151b24",
+            fg="#f8fafc",
+            font=("Segoe UI", 16, "bold"),
+        ).pack(side="left")
+        self.noise_label = tk.Label(
+            monitor_header,
+            text="Nhiễu nền: 0.0",
+            bg="#151b24",
+            fg="#8fa3b8",
+            font=("Consolas", 10, "bold"),
+        )
+        self.noise_label.pack(side="right")
+
+        monitor = tk.Frame(right, bg="#151b24")
+        monitor.grid(row=1, column=0, sticky="nsew", padx=18, pady=(8, 14))
+        for column in range(7):
+            monitor.columnconfigure(column, weight=1)
+        monitor.rowconfigure(0, weight=1)
+
+        self.meters = {
+            "total": VerticalMeter(monitor, "Tổng âm lượng", "#94a3b8", 6000, width=82),
+            "bass": VerticalMeter(monitor, "Trầm / Nổ (Trái)", "#38bdf8", 6000, width=82),
+            "crisp": VerticalMeter(monitor, "Đanh / Súng (Phải)", "#a855f7", 4000, width=82),
+            "beat": VerticalMeter(monitor, "Nhịp điệu", "#f59e0b", 1.0, "{:.3f}", width=82),
+            "overdrive": VerticalMeter(monitor, "Xung Kick", "#ef4444", 0.6, "{:.3f}", width=82),
+            "left": VerticalMeter(monitor, "Motor Trái (Nặng)", "#34d399", 1.0, "{:.3f}", width=92, height=300),
+            "right": VerticalMeter(monitor, "Motor Phải (Nhẹ)", "#60a5fa", 1.0, "{:.3f}", width=92, height=300),
+        }
+        for col, meter in enumerate(self.meters.values()):
+            meter.grid(row=0, column=col, sticky="nsew", padx=5)
+
+        log_frame = tk.Frame(right, bg="#0d1118", highlightthickness=1, highlightbackground="#293241")
+        log_frame.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
+        tk.Label(
+            log_frame,
+            text="Nhật ký hoạt động",
+            bg="#0d1118",
+            fg="#cbd5e1",
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w", padx=10, pady=(8, 0))
+        self.log_text = scrolledtext.ScrolledText(
+            log_frame,
+            height=6,
+            state="disabled",
+            bg="#0d1118",
+            fg="#d8e0ea",
+            insertbackground="#ffffff",
+            relief="flat",
+            font=("Consolas", 9),
+        )
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=(6, 10))
+
+    def make_panel(self, parent, title):
+        outer = tk.Frame(parent, bg="#151b24", highlightthickness=1, highlightbackground="#293241")
+        tk.Label(
+            outer,
+            text=title,
+            bg="#151b24",
+            fg="#f8fafc",
+            font=("Segoe UI", 11, "bold"),
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))
+        body = tk.Frame(outer, bg="#151b24")
+        body.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 12))
+        body.columnconfigure(0, weight=0)
+        body.columnconfigure(1, weight=1)
+        outer.columnconfigure(0, weight=1)
+        return outer, body
+
+    def add_hint(self, parent, row, text):
+        tk.Label(
+            parent,
+            text=text,
+            bg="#151b24",
+            fg="#8fa3b8",
+            wraplength=380,
+            justify="left",
+            anchor="w",
+            font=("Segoe UI", 8),
+        ).grid(row=row, column=0, columnspan=3, sticky="ew", pady=(2, 4))
+
+    def add_slider(self, parent, row, label, attr, from_, to, fmt, is_int=False, help_text=""):
+        base_row = row * 2
+        ttk.Label(parent, text=label, style="Muted.TLabel").grid(row=base_row, column=0, sticky="w", pady=(5, 0))
+        value_label = ttk.Label(parent, width=8, style="Value.TLabel")
+        value_label.grid(row=base_row, column=2, sticky="e", padx=(8, 0), pady=(5, 0))
+        scale = ttk.Scale(
+            parent,
+            from_=from_,
+            to=to,
+            orient="horizontal",
+            command=lambda value, a=attr, f=fmt, i=is_int, l=value_label: self.set_numeric(a, value, f, i, l),
+        )
+        scale.grid(row=base_row, column=1, sticky="ew", padx=(10, 8), pady=(5, 0))
+        if help_text:
+            self.add_hint(parent, base_row + 1, help_text)
+        self.sliders[attr] = (scale, value_label, fmt, is_int)
+
+    def select_palette_color(self, hex_color):
+        with self.shared.lock:
+            self.shared.apex_static_color = hex_color
+            if self.shared.apex_led_mode == "Màu tĩnh":
+                self.shared.apex_static_color = hex_color
+        self.log_queue.put(f"Đã chọn màu LED Apex: {hex_color}")
+        self.led_preview_canvas.itemconfig(self.led_preview_bar, fill=hex_color)
+        self.save_settings()
+
+    def pick_custom_color(self):
+        snap = self.shared.snapshot()
+        color = colorchooser.askcolor(initialcolor=snap["apex_static_color"], title="Chọn màu LED Apex tùy chỉnh")
+        if color and color[1]:
+            hex_col = color[1]
+            self.select_palette_color(hex_col)
+
+    def set_apex_params(self):
+        with self.shared.lock:
+            self.shared.apex_led_enabled = self.apex_enabled_var.get()
+            self.shared.apex_led_mode = self.apex_mode_var.get()
+            self.shared.apex_reactive_type = self.apex_style_var.get()
+        self.log_queue.put(f"Cập nhật LED Apex: {'BẬT' if self.apex_enabled_var.get() else 'TẮT'} | {self.apex_mode_var.get()} | {self.apex_style_var.get()}")
+        self.save_settings()
+
+    def set_apex_brightness_scale(self, val):
+        b = float(val)
+        with self.shared.lock:
+            self.shared.apex_brightness = b
+        if hasattr(self, "apex_bright_label"):
+            self.apex_bright_label.config(text=f"{int(b*100)}%")
+        self.save_settings()
+
+    def sync_controls_from_params(self):
+        snap = self.shared.snapshot()
+        self.enabled_var.set(snap["enabled"])
+        self.sync_power_button(snap["enabled"])
+        self.controller_var.set(str(snap["controller_index"]))
+        if hasattr(self, "auto_var"):
+            self.auto_var.set(snap["auto_profile"])
+        if hasattr(self, "stereo_var"):
+            self.stereo_var.set(snap["stereo_panning"])
+        if hasattr(self, "dual_var"):
+            self.dual_var.set(snap["dual_motor_mode"])
+
+        if hasattr(self, "apex_enabled_var"):
+            self.apex_enabled_var.set(snap["apex_led_enabled"])
+            self.apex_mode_var.set(snap["apex_led_mode"])
+            self.apex_style_var.set(snap["apex_reactive_type"])
+            self.apex_bright_scale.set(snap["apex_brightness"])
+            self.apex_bright_label.config(text=f"{int(snap['apex_brightness']*100)}%")
+            self.led_preview_canvas.itemconfig(self.led_preview_bar, fill=snap["apex_static_color"])
+
+        for attr, (scale, label, fmt, _is_int) in self.sliders.items():
+            if attr in snap:
+                scale.set(snap[attr])
+                label.config(text=fmt.format(snap[attr]))
+
+    def start_engine(self):
+        if self.audio_thread and self.audio_thread.is_alive():
+            return
+        self.stop_event.clear()
+        self.audio_thread = threading.Thread(
+            target=audio_vibration_thread,
+            args=(self.shared, self.log_queue, self.stop_event),
+            daemon=True,
+        )
+        self.audio_thread.start()
+
+    def set_numeric(self, attr, value, fmt, is_int, label):
+        value = int(float(value)) if is_int else float(value)
+        with self.shared.lock:
+            setattr(self.shared, attr, value)
+        label.config(text=fmt.format(value))
+
+    def toggle_vibration(self):
+        with self.shared.lock:
+            self.shared.enabled = not self.shared.enabled
+            enabled = self.shared.enabled
+        if hasattr(self, "enabled_var"):
+            self.enabled_var.set(enabled)
+        if not enabled:
+            snap = self.shared.snapshot()
+            set_vibration(snap["controller_index"], 0, 0)
+        self.sync_power_button(enabled)
+        self.log_queue.put(f"Chuyển đổi trạng thái rung: {'🟢 ĐANG BẬT' if enabled else '🔴 ĐÃ TẮT'}")
+
+    def sync_power_button(self, enabled):
+        if not hasattr(self, "master_power_btn"):
+            return
+        if enabled:
+            self.master_power_btn.config(
+                text="🟢 RUNG: ĐANG BẬT (F9)",
+                bg="#15803d",
+                activebackground="#16a34a",
+                fg="#ffffff",
+            )
+        else:
+            self.master_power_btn.config(
+                text="🔴 RUNG: ĐÃ TẮT (F9)",
+                bg="#b91c1c",
+                activebackground="#dc2626",
+                fg="#ffffff",
+            )
+
+    def set_enabled(self):
+        with self.shared.lock:
+            self.shared.enabled = self.enabled_var.get()
+            enabled = self.shared.enabled
+        if not enabled:
+            snap = self.shared.snapshot()
+            set_vibration(snap["controller_index"], 0, 0)
+        self.sync_power_button(enabled)
+        self.log_queue.put(f"Trạng thái rung: {'🟢 BẬT' if enabled else '🔴 TẮT'}")
+
+    def set_auto_profile(self):
+        with self.shared.lock:
+            self.shared.auto_profile = self.auto_var.get()
+        self.profile_label.config(text="Tự động nhận diện Haptic" if self.auto_var.get() else "Cố định thủ công")
+
+    def set_stereo(self):
+        with self.shared.lock:
+            self.shared.stereo_panning = self.stereo_var.get()
+        self.log_queue.put(f"Định vị không gian Stereo: {'BẬT' if self.stereo_var.get() else 'TẮT'}")
+
+    def set_dual_motor(self):
+        with self.shared.lock:
+            self.shared.dual_motor_mode = self.dual_var.get()
+        self.log_queue.put(f"Tách 2 Motor phần cứng: {'BẬT' if self.dual_var.get() else 'TẮT'}")
+
+    def set_controller(self):
+        with self.shared.lock:
+            old_index = self.shared.controller_index
+            self.shared.controller_index = int(self.controller_var.get())
+        set_vibration(old_index, 0, 0)
+        self.log_queue.put(f"Đã chuyển sang tay cầm số {self.controller_var.get()}.")
+
+    def apply_preset(self):
+        name = self.preset_var.get()
+        if name in PRESETS:
+            preset = PRESETS[name]
+            self.shared.apply(preset)
+            self.sync_controls_from_params()
+            self.log_queue.put(f"Đã kích hoạt cấu hình: {name}")
+
+    def start_calibration(self):
+        with self.shared.lock:
+            self.shared.auto_calibrating = True
+
+    def test_vibration(self):
+        if self.test_thread and self.test_thread.is_alive():
+            return
+
+        def run():
+            snap = self.shared.snapshot()
+            index = snap["controller_index"]
+            if not is_controller_connected(index):
+                self.log_queue.put("Kiểm tra thất bại: Tay cầm chưa được kết nối.")
+                return
+            self.log_queue.put("Bắt đầu kiểm tra rung: Trái (Trầm) -> Phải (Đanh) -> Cả hai (DualSense Kick)")
+            pattern = [
+                (0.60, 0.0, 0.22),
+                (0.0, 0.60, 0.22),
+                (0.85, 0.85, 0.30),
+                (0.0, 0.0, 0.05),
+            ]
+            for left, right, duration in pattern:
+                if self.stop_event.is_set():
+                    break
+                set_vibration(index, left, right)
+                time.sleep(duration)
+            set_vibration(index, 0, 0)
+            self.log_queue.put("Kiểm tra rung hoàn tất.")
+
+        self.test_thread = threading.Thread(target=run, daemon=True)
+        self.test_thread.start()
+
+    def update_gui(self):
+        snap = self.shared.snapshot()
+        stats = snap["stats"]
+        connected = "Đã kết nối" if stats["controller_connected"] else "Chưa kết nối"
+        running = self.audio_thread is not None and self.audio_thread.is_alive()
+        auto_text = stats["detected_mode"] if snap["auto_profile"] else "Thủ công"
+
+        pan = stats.get("stereo_pan", 0.0)
+        if abs(pan) < 0.12:
+            pan_str = "Cân bằng"
+        elif pan < 0:
+            pan_str = f"Lệch Trái ({abs(pan)*100:.0f}%)"
+        else:
+            pan_str = f"Lệch Phải ({abs(pan)*100:.0f}%)"
+
+        self.status_label.config(text=f"Tay cầm {snap['controller_index']}: {connected} | {auto_text} | {'Đang chạy' if running else 'Đã dừng'}")
+        self.device_label.config(text=f"Nguồn âm thanh: {stats['device_name']}")
+        self.noise_label.config(text=f"Định vị: {pan_str}  |  Nhiễu nền: {stats['noise_floor']:.1f}")
+        self.profile_label.config(text="Tự động nhận diện Haptic" if snap["auto_profile"] else "Cố định thủ công")
+
+        # Cập nhật hiển thị trạng thái LED Apex
+        if hasattr(self, "apex_status_label"):
+            if stats.get("apex_connected", False):
+                self.apex_status_label.config(text="🟢 Đã kết nối Flydigi Apex", fg="#22c55e")
+            else:
+                self.apex_status_label.config(text="⚪ Đang quét tay cầm Apex / Dongle...", fg="#94a3b8")
+
+        # Cập nhật ô đèn LED ảo (Preview)
+        if hasattr(self, "led_preview_canvas"):
+            current_color = stats.get("current_led_hex", "#00b4d8")
+            self.led_preview_canvas.itemconfig(self.led_preview_bar, fill=current_color)
+
+        self.meters["total"].set(stats["total_rms"])
+        self.meters["bass"].set(stats["bass_rms"])
+        self.meters["crisp"].set(stats.get("crisp_rms", stats["vocal_rms"]))
+        self.meters["beat"].set(stats["beat_strength"])
+        self.meters["overdrive"].set(stats.get("overdrive_kick", 0.0))
+        self.meters["left"].set(stats["left_output"], stats["peak_left"])
+        self.meters["right"].set(stats["right_output"], stats["peak_right"])
+
+        while True:
+            try:
+                msg = self.log_queue.get_nowait()
+            except queue.Empty:
+                break
+            self.append_log(msg)
+
+        self.sync_power_button(snap["enabled"])
+        if hasattr(self, "enabled_var") and self.enabled_var.get() != snap["enabled"]:
+            self.enabled_var.set(snap["enabled"])
+
+        if snap["auto_calibrating"]:
+            self.status_label.config(text=f"Tay cầm {snap['controller_index']}: {connected} | Đang hiệu chuẩn...")
+
+        self.master.after(50, self.update_gui)
+
+    def append_log(self, msg):
+        timestamp = time.strftime("%H:%M:%S")
+        self.log_text.config(state="normal")
+        self.log_text.insert(tk.END, f"[{timestamp}] {msg}\n")
+        self.log_text.see(tk.END)
+        lines = int(self.log_text.index("end-1c").split(".")[0])
+        if lines > 300:
+            self.log_text.delete("1.0", "80.0")
+        self.log_text.config(state="disabled")
+
+    def on_closing(self):
+        self.save_settings()
+        self.stop_event.set()
+        snap = self.shared.snapshot()
+        set_vibration(snap["controller_index"], 0, 0)
+        self.master.after(120, self.master.destroy)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = VibrationApp(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    root.mainloop()
