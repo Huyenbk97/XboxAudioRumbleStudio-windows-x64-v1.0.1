@@ -566,6 +566,81 @@ def set_vibration(user_index, left_motor, right_motor):
     return XInputSetState(int(user_index), ctypes.byref(vibration))
 
 
+class Unified4ChannelDispatcher:
+    """Điều khiển 4 kênh rung độc lập: 2 mô tơ thân (Left/Right Grip) + 2 mô tơ cò (Left/Right Trigger)
+
+    Sử dụng Windows.Gaming.Input (WinRT) cho tay cầm Xbox One/Series X|S/Elite,
+    và tự động hòa trộn dự phòng (Graceful Blend) sang XInput cho tay cầm 2 mô tơ thông thường.
+    """
+    def __init__(self):
+        self.wgi = None
+        self.wgi_available = False
+        try:
+            import winrt.windows.gaming.input as wgi
+            import winrt.windows.foundation.collections  # Cần cho IVectorView duyệt Gamepad.gamepads
+            self.wgi = wgi
+            self.wgi_available = True
+        except Exception:
+            self.wgi = None
+            self.wgi_available = False
+        self._last_gamepads = []
+        self._last_scan_time = 0.0
+
+    def get_wgi_gamepad(self, index: int):
+        if not self.wgi_available or not self.wgi:
+            return None
+        now = time.monotonic()
+        if (now - self._last_scan_time) > 1.0 or not self._last_gamepads:
+            try:
+                self._last_gamepads = list(self.wgi.Gamepad.gamepads)
+                self._last_scan_time = now
+            except Exception:
+                self._last_gamepads = []
+        if 0 <= index < len(self._last_gamepads):
+            return self._last_gamepads[index]
+        return None
+
+    def set_vibration_4ch(self, user_index: int, left_grip: float, right_grip: float, left_trigger: float = 0.0, right_trigger: float = 0.0) -> bool:
+        lg = clamp(left_grip)
+        rg = clamp(right_grip)
+        lt = clamp(left_trigger)
+        rt = clamp(right_trigger)
+
+        gp = self.get_wgi_gamepad(int(user_index))
+        if gp:
+            try:
+                vib = self.wgi.GamepadVibration(
+                    left_motor=float(lg),
+                    right_motor=float(rg),
+                    left_trigger=float(lt),
+                    right_trigger=float(rt),
+                )
+                gp.vibration = vib
+                return True
+            except Exception:
+                pass
+
+        # Fallback sang XInput: Hòa trộn lực cò vào 2 mô tơ thân
+        blended_left = clamp(lg + lt * 0.4)
+        blended_right = clamp(rg + rt * 0.4)
+        set_vibration(user_index, blended_left, blended_right)
+        return False
+
+    def stop_all(self):
+        try:
+            if self.wgi_available and self._last_gamepads:
+                zero_vib = self.wgi.GamepadVibration(0.0, 0.0, 0.0, 0.0)
+                for gp in self._last_gamepads:
+                    try:
+                        gp.vibration = zero_vib
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        for i in range(4):
+            set_vibration(i, 0.0, 0.0)
+
+
 def is_controller_connected(index):
     state = XInputState()
     return XInputGetState(int(index), ctypes.byref(state)) == XINPUT_SUCCESS
