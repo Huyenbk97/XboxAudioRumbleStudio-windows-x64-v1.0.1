@@ -697,6 +697,40 @@ def classify_content(total_rms, vocal_rms, bass_rms, crisp_rms, transient, previ
     return previous_mode if previous_mode in {"Game Haptic", "Nhạc", "ASMR"} else "Game Haptic"
 
 
+def calculate_trigger_haptics(bands: dict, mode: str = "adaptive_gun_brake", gain_l: float = 0.70, gain_r: float = 0.85, threshold: float = 0.04) -> tuple[float, float]:
+    """Tính toán độ rung haptic cho 2 nút cò LT và RT dựa trên phổ âm thanh."""
+    punch_r = bands.get("punch_r", 0.0)
+    highmid_r = bands.get("highmid_r", 0.0)
+    lowmid_l = bands.get("lowmid_l", 0.0)
+    sub_l = bands.get("sub_l", 0.0)
+    pan = bands.get("stereo_pan", 0.0)
+    total = bands.get("total_rms", 0.0)
+
+    if mode == "directional_stereo":
+        base_l = (lowmid_l + sub_l) * 0.5
+        base_r = (punch_r + highmid_r) * 0.5
+        if pan < -0.1:
+            lt_raw = base_l * (1.0 + abs(pan) * 0.5)
+            rt_raw = base_r * max(0.1, 1.0 - abs(pan) * 0.7)
+        elif pan > 0.1:
+            rt_raw = base_r * (1.0 + abs(pan) * 0.5)
+            lt_raw = base_l * max(0.1, 1.0 - abs(pan) * 0.7)
+        else:
+            lt_raw = base_l
+            rt_raw = base_r
+    elif mode == "linked_body":
+        lt_raw = rt_raw = total
+    else:
+        # Mặc định: adaptive_gun_brake (RT Bắn súng / LT Phanh & Ngắm)
+        rt_raw = 0.6 * punch_r + 0.4 * highmid_r
+        lt_raw = 0.5 * lowmid_l + 0.5 * sub_l
+
+    rt_val = 0.0 if rt_raw < threshold else clamp((rt_raw - threshold) / max(1e-5, 1.0 - threshold)) * gain_r
+    lt_val = 0.0 if lt_raw < threshold else clamp((lt_raw - threshold) / max(1e-5, 1.0 - threshold)) * gain_l
+
+    return clamp(lt_val), clamp(rt_val)
+
+
 def find_loopback_device(audio, log_queue):
     loopback_devices = []
     for i in range(audio.get_device_count()):
@@ -730,6 +764,8 @@ def audio_vibration_thread(shared, log_queue, stop_event):
 
     left_vib = 0.0
     right_vib = 0.0
+    left_trigger_vib = 0.0
+    right_trigger_vib = 0.0
     prev_target_left = 0.0
     prev_target_right = 0.0
     energy_avg = 100.0
@@ -738,6 +774,7 @@ def audio_vibration_thread(shared, log_queue, stop_event):
     calibration_until = 0.0
     last_hotkey_pressed = False
     detected_mode = "Game Haptic"
+    dispatcher = Unified4ChannelDispatcher()
 
     apex_ctrl = FlydigiApexController()
     last_apex_state = apex_ctrl.is_connected
@@ -991,12 +1028,51 @@ def audio_vibration_thread(shared, log_queue, stop_event):
             if right_vib < effective["dead_zone"]:
                 right_vib = 0.0
 
-            if snap["enabled"] and connected:
-                set_vibration(controller_index, left_vib, right_vib)
+            # Xử lý Rung 2 Nút Cò LT/RT (Phase 3: Trigger Haptics)
+            if snap.get("trigger_haptics_enabled", True):
+                norm_punch = clamp(band_rms(fft_data, freqs, 90, 260, n) / max(effective["map_in_max"] * 0.6, 1.0))
+                norm_highmid = clamp(band_rms(fft_data, freqs, 900, 2800, n) / max(effective["map_in_max"] * 0.5, 1.0))
+                norm_lowmid = clamp(band_rms(fft_data, freqs, 160, 600, n) / max(effective["map_in_max"] * 0.7, 1.0))
+                norm_sub = clamp(band_rms(fft_data, freqs, 20, 110, n) / max(effective["map_in_max"] * 0.8, 1.0))
+
+                pan_val = stereo_pan if effective["stereo_panning"] else 0.0
+                punch_r_val = norm_punch * (1.0 + max(0.0, pan_val) * 0.45)
+                highmid_r_val = norm_highmid * (1.0 + max(0.0, pan_val) * 0.45)
+                lowmid_l_val = norm_lowmid * (1.0 + max(0.0, -pan_val) * 0.45)
+                sub_l_val = norm_sub * (1.0 + max(0.0, -pan_val) * 0.45)
+
+                trigger_bands = {
+                    "punch_r": punch_r_val,
+                    "highmid_r": highmid_r_val,
+                    "lowmid_l": lowmid_l_val,
+                    "sub_l": sub_l_val,
+                    "stereo_pan": pan_val,
+                    "total_rms": clamp(total_rms / max(effective["map_in_max"], 1.0)),
+                }
+                raw_lt, raw_rt = calculate_trigger_haptics(
+                    trigger_bands,
+                    mode=snap.get("trigger_mode", "adaptive_gun_brake"),
+                    gain_l=snap.get("trigger_left_gain", 0.70),
+                    gain_r=snap.get("trigger_right_gain", 0.85),
+                    threshold=snap.get("trigger_threshold", 0.04),
+                )
+                left_trigger_vib = smooth_signal(left_trigger_vib, raw_lt, 0.85, 0.35)
+                right_trigger_vib = smooth_signal(right_trigger_vib, raw_rt, 0.90, 0.35)
             else:
-                set_vibration(controller_index, 0, 0)
+                left_trigger_vib = 0.0
+                right_trigger_vib = 0.0
+
+            if left_trigger_vib < effective["dead_zone"]:
+                left_trigger_vib = 0.0
+            if right_trigger_vib < effective["dead_zone"]:
+                right_trigger_vib = 0.0
+
+            if snap["enabled"] and connected:
+                dispatcher.set_vibration_4ch(controller_index, left_vib, right_vib, left_trigger_vib, right_trigger_vib)
+            else:
+                dispatcher.set_vibration_4ch(controller_index, 0.0, 0.0, 0.0, 0.0)
                 if not snap["enabled"]:
-                    left_vib = right_vib = 0.0
+                    left_vib = right_vib = left_trigger_vib = right_trigger_vib = 0.0
 
             # Xử lý màu Đèn LED Apex
             cur_led_hex = "#151b24"
@@ -1066,6 +1142,9 @@ def audio_vibration_thread(shared, log_queue, stop_event):
                 shared.stats.controller_connected = connected
                 shared.stats.peak_left = max(shared.stats.peak_left * 0.985, left_vib)
                 shared.stats.peak_right = max(shared.stats.peak_right * 0.985, right_vib)
+                shared.stats.peak_left_trigger = max(shared.stats.peak_left_trigger * 0.985, left_trigger_vib)
+                shared.stats.peak_right_trigger = max(shared.stats.peak_right_trigger * 0.985, right_trigger_vib)
+                shared.stats.trigger_haptics_active = (left_trigger_vib > 0.04 or right_trigger_vib > 0.04)
                 shared.stats.detected_mode = detected_mode
                 shared.stats.beat_strength = beat_pulse
                 shared.stats.texture_level = texture_level
@@ -1085,7 +1164,7 @@ def audio_vibration_thread(shared, log_queue, stop_event):
             except Exception:
                 pass
         snap = shared.snapshot()
-        set_vibration(snap["controller_index"], 0, 0)
+        dispatcher.stop_all()
         apex_ctrl.close()
         if stream is not None:
             stream.close()
