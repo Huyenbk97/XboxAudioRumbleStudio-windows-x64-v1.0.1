@@ -1,6 +1,6 @@
 # Trigger Haptics (Phase 3) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Triển khai rung độc lập 2 nút cò LT/RT (Xbox Impulse Triggers & Flydigi Adaptive Triggers) trên nền tảng 4 mô tơ haptic, kết hợp thuật toán âm thanh tách bạch tiếng súng/bắn (RT) và tiếng phanh/va chạm (LT), tự động hòa trộn lực cho tay cầm 2 mô tơ.
 
@@ -61,12 +61,12 @@ graph TD
 **Interfaces:**
 - Produces: `trigger_haptics_enabled: bool`, `trigger_left_gain: float`, `trigger_right_gain: float`, `trigger_mode: str`, `trigger_threshold: float` trong `SharedVibrationParams` và `RuntimeStats`.
 
-- [ ] **Step 1: Cài đặt thư viện `winrt-Windows.Gaming.Input`**
+- [x] **Step 1: Cài đặt thư viện `winrt-Windows.Gaming.Input`**
 
 Run: `pip install winrt-Windows.Gaming.Input`
 Expected: Cài đặt thành công `winrt-Windows.Gaming.Input` và `winrt-runtime`.
 
-- [ ] **Step 2: Viết test kiểm tra schema Phase 3**
+- [x] **Step 2: Viết test kiểm tra schema Phase 3**
 
 Tạo file `test_phase3_schema.py`:
 ```python
@@ -97,12 +97,12 @@ if __name__ == "__main__":
     print("PHASE 3 SCHEMA TEST PASSED")
 ```
 
-- [ ] **Step 3: Chạy test để xác nhận FAIL trước khi sửa code**
+- [x] **Step 3: Chạy test để xác nhận FAIL trước khi sửa code**
 
 Run: `python test_phase3_schema.py`
 Expected: FAIL với AttributeError vì các trường chưa được khai báo.
 
-- [ ] **Step 4: Bổ sung các trường Phase 3 vào SharedVibrationParams & RuntimeStats trong xbox6.py**
+- [x] **Step 4: Bổ sung các trường Phase 3 vào SharedVibrationParams & RuntimeStats trong xbox6.py**
 
 Bổ sung:
 ```python
@@ -114,7 +114,7 @@ Bổ sung:
 ```
 Cập nhật trong `snapshot()` và các file cấu hình json.
 
-- [ ] **Step 5: Chạy test để xác nhận PASS**
+- [x] **Step 5: Chạy test để xác nhận PASS**
 
 Run: `python test_phase3_schema.py`
 Expected: PASS ("PHASE 3 SCHEMA TEST PASSED").
@@ -131,7 +131,7 @@ Expected: PASS ("PHASE 3 SCHEMA TEST PASSED").
 - Produces: `class Unified4ChannelDispatcher` hoặc hàm `set_vibration_4ch(user_index, left_grip, right_grip, left_trigger, right_trigger)`.
 - Fallback: Tự hòa trộn sang XInput `XInputSetState` khi WGI không có thiết bị.
 
-- [ ] **Step 1: Viết test cho Unified4ChannelDispatcher**
+- [x] **Step 1: Viết test cho Unified4ChannelDispatcher**
 
 Tạo file `test_wgi_dispatcher.py`:
 ```python
@@ -149,12 +149,12 @@ if __name__ == "__main__":
     print("DISPATCHER TEST PASSED")
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận FAIL**
+- [x] **Step 2: Chạy test để xác nhận FAIL**
 
 Run: `python test_wgi_dispatcher.py`
 Expected: FAIL vì `Unified4ChannelDispatcher` chưa tồn tại.
 
-- [ ] **Step 3: Triển khai Unified4ChannelDispatcher trong xbox6.py**
+- [x] **Step 3: Triển khai Unified4ChannelDispatcher trong xbox6.py**
 
 ```python
 class Unified4ChannelDispatcher:
@@ -201,7 +201,7 @@ class Unified4ChannelDispatcher:
         return False
 ```
 
-- [ ] **Step 4: Chạy test để xác nhận PASS**
+- [x] **Step 4: Chạy test để xác nhận PASS**
 
 Run: `python test_wgi_dispatcher.py`
 Expected: PASS ("DISPATCHER TEST PASSED").
@@ -218,7 +218,7 @@ Expected: PASS ("DISPATCHER TEST PASSED").
 - Consumes: FFT frequency bands (Punch Bass, High-Mid, Low-Mid, Sub-bass).
 - Produces: `target_left_trigger: float`, `target_right_trigger: float` (0.0 -> 1.0).
 
-- [ ] **Step 1: Viết test cho thuật toán phân dải âm thanh cò**
+- [x] **Step 1: Viết test cho thuật toán phân dải âm thanh cò**
 
 Tạo file `test_dsp_trigger_calc.py`:
 ```python
@@ -252,16 +252,16 @@ if __name__ == "__main__":
     print("DSP TRIGGER CALC TEST PASSED")
 ```
 
-- [ ] **Step 2: Chạy test để xác nhận FAIL**
+- [x] **Step 2: Chạy test để xác nhận FAIL**
 
 Run: `python test_dsp_trigger_calc.py`
 Expected: FAIL vì `calculate_trigger_haptics` chưa được định nghĩa.
 
-- [ ] **Step 3: Triển khai hàm calculate_trigger_haptics và tích hợp vào audio loop trong xbox6.py**
+- [x] **Step 3: Triển khai hàm calculate_trigger_haptics và tích hợp vào audio loop trong xbox6.py**
 
 Viết hàm `calculate_trigger_haptics()` và nối vào `audio_vibration_thread`, gửi giá trị qua `Unified4ChannelDispatcher`.
 
-- [ ] **Step 4: Chạy test để xác nhận PASS**
+- [x] **Step 4: Chạy test để xác nhận PASS**
 
 Run: `python test_dsp_trigger_calc.py`
 Expected: PASS ("DSP TRIGGER CALC TEST PASSED").
@@ -277,7 +277,7 @@ Expected: PASS ("DSP TRIGGER CALC TEST PASSED").
 **Interfaces:**
 - Produces: `FlydigiController.set_triggers(left_val, right_val)`.
 
-- [ ] **Step 1: Viết test cho phương thức set_triggers của FlydigiController**
+- [x] **Step 1: Viết test cho phương thức set_triggers của FlydigiController**
 
 Tạo file `test_flydigi_triggers.py`:
 ```python
@@ -293,11 +293,11 @@ if __name__ == "__main__":
     print("FLYDIGI TRIGGER TEST PASSED")
 ```
 
-- [ ] **Step 2: Triển khai set_triggers trong FlydigiController**
+- [x] **Step 2: Triển khai set_triggers trong FlydigiController**
 
 Tạo gói tin HID Output Report cho cò Flydigi Apex/Vader.
 
-- [ ] **Step 3: Chạy test để xác nhận PASS**
+- [x] **Step 3: Chạy test để xác nhận PASS**
 
 Run: `python test_flydigi_triggers.py`
 Expected: PASS.
@@ -317,9 +317,9 @@ Expected: PASS.
   - Scale: `Cường độ Cò Phải (RT - Bắn/Ga)` (0-100%)
   - Combobox: Chế độ rung cò.
 
-- [ ] **Step 1: Thêm widget điều khiển vào Panel 2 trong create_widgets()**
-- [ ] **Step 2: Triển khai các callback cập nhật giá trị & sync_controls_from_params()**
-- [ ] **Step 3: Kiểm thử live GUI initialization trong subprocess 3 giây**
+- [x] **Step 1: Thêm widget điều khiển vào Panel 2 trong create_widgets()**
+- [x] **Step 2: Triển khai các callback cập nhật giá trị & sync_controls_from_params()**
+- [x] **Step 3: Kiểm thử live GUI initialization trong subprocess 3 giây**
 
 Run: `python -c "import subprocess, time; p = subprocess.Popen(['python', 'xbox6.py']); time.sleep(3); p.terminate()"`
 Expected: Khởi động sạch sẽ và thoát không lỗi.
@@ -334,22 +334,22 @@ Expected: Khởi động sạch sẽ và thoát không lỗi.
 - Modify: [installer.iss](file:///c:/Users/LapTopNhatAn/Downloads/Compressed/XboxAudioRumbleStudio-windows-x64-v1.0.1/installer.iss)
 - Modify: [README.md](file:///c:/Users/LapTopNhatAn/Downloads/Compressed/XboxAudioRumbleStudio-windows-x64-v1.0.1/README.md)
 
-- [ ] **Step 1: Kiểm thử cú pháp toàn bộ file mã nguồn**
+- [x] **Step 1: Kiểm thử cú pháp toàn bộ file mã nguồn**
 
 Run: `python -m py_compile xbox6.py`
 Expected: Exit code 0.
 
-- [ ] **Step 2: Đóng gói standalone exe bằng PyInstaller**
+- [x] **Step 2: Đóng gói standalone exe bằng PyInstaller**
 
 Run: `pyinstaller --noconfirm --onefile --windowed --icon=app.ico --name=XboxAudioRumbleStudio --collect-all proctap --collect-all scipy --collect-all winrt --distpath=. xbox6.py`
 Expected: Tạo thành công `XboxAudioRumbleStudio.exe`.
 
-- [ ] **Step 3: Nâng cấp installer.iss lên v1.3.0 và biên dịch Inno Setup**
+- [x] **Step 3: Nâng cấp installer.iss lên v1.3.0 và biên dịch Inno Setup**
 
 Run: `& "C:\Users\LapTopNhatAn\AppData\Local\Programs\Inno Setup 6\ISCC.exe" installer.iss`
 Expected: Tạo thành công `XboxAudioRumbleStudio-Setup-v1.3.0.exe`.
 
-- [ ] **Step 4: Dọn dẹp test tạm, commit Git & tạo Release v1.3.0 trên GitHub**
+- [x] **Step 4: Dọn dẹp test tạm, commit Git & tạo Release v1.3.0 trên GitHub**
 
 Xóa các file test tạm: `test_phase3_schema.py`, `test_wgi_dispatcher.py`, `test_dsp_trigger_calc.py`, `test_flydigi_triggers.py`.
 Push commits lên `main` và upload bản cài đặt lên GitHub Release `v1.3.0`.

@@ -80,8 +80,16 @@ Ngoài ra, ứng dụng tích hợp sẵn bộ giao tiếp phần cứng HID đ�
 * **Cơ chế Fallback thông minh**: Khi game chưa có âm thanh (load màn hình, tạm dừng), ứng dụng tự động hoàn về âm thanh hệ thống để giữ nhịp rung liên tục; khi game phát tiếng trở lại, tự động tái kích hoạt cô lập.
 * Dễ dàng chuyển đổi trực tiếp trên giao diện giữa `🎯 Tự động cô lập Game đang chơi` và `🔊 Toàn hệ thống Windows`.
 
-### 8. Giao Diện Người Dùng Hiện Đại (Dark Mode 100% Tiếng Việt)
-* Thiết kế tối ưu hiển thị, trực quan với **7 phổ đo thời gian thực** (Tổng âm lượng, Âm trầm, Âm đanh, Nhịp trống, Overdrive Kick, Motor Trái/Phải).
+### 8. Rung Độc Lập 2 Nút Cò LT/RT (Xbox Impulse & Flydigi Adaptive Triggers)
+* **Điều khiển 4 mô tơ độc lập**: Tích hợp Windows Runtime `winrt-Windows.Gaming.Input` điều khiển trực tiếp 4 mô tơ (`LeftGrip`, `RightGrip`, `LeftTrigger`, `RightTrigger`) trên tay cầm Xbox One, Xbox Series X|S, Xbox Elite 2 với độ trễ < 2ms.
+* **Giao thức HID cho Flydigi**: Tự động gửi gói tin cấu hình phản hồi lực cò servo cho các dòng tay cầm Flydigi Apex 3/4 và Vader 3/4 Pro.
+* **Thuật toán DSP chuyên biệt**:
+  - **Cò Phải (RT - Bắn/Ga)**: Phát xung giật đanh tức thì (Fast Impulse 20-35ms) theo tiếng súng và cú đấm/nổ.
+  - **Cò Trái (LT - Phanh/Ngắm)**: Rung rần rãnh mịn theo phanh lốp rê trượt và tiếng gầm rú động cơ.
+* **Cơ chế Auto-Blend**: Tự động hòa trộn lực rung của cò vào thân khi sử dụng tay cầm 2 mô tơ thông thường, không gây lỗi driver.
+
+### 9. Giao Diện Người Dùng Hiện Đại (Dark Mode 100% Tiếng Việt)
+* Thiết kế tối ưu hiển thị, trực quan với **9 phổ đo thời gian thực** (Tổng âm, Trầm/Nổ, Đanh/Súng, Nhịp điệu, Xung Kick, Motor Trái/Phải, Cò LT/RT).
 * Nút bấm bật/tắt nguồn rung lớn trên Header chuyển màu Xanh/Đỏ trực quan.
 
 
