@@ -7,12 +7,18 @@ import time
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from tkinter import colorchooser, scrolledtext, ttk
+from tkinter import colorchooser, filedialog, messagebox, scrolledtext, ttk
 import tkinter as tk
 from ctypes import wintypes
 
 import numpy as np
 import pyaudiowpatch as pyaudio
+from PIL import Image
+import pystray
+import psutil
+import win32gui
+import win32process
+
 
 
 APP_TITLE = "Xbox Audio Rumble Studio - Chuẩn Haptic DualSense & LED Apex"
@@ -464,6 +470,21 @@ class SharedVibrationParams:
     apex_static_color: str = "#00b4d8"
     apex_brightness: float = 1.0
 
+    # Cài đặt Khay Hệ Thống & Tự Động Nhận Diện Game
+    minimize_to_tray: bool = True
+    auto_game_detect: bool = True
+    fallback_preset: str = "✨ Chuẩn Xúc Giác Haptic DualSense"
+    game_profiles: dict = field(
+        default_factory=lambda: {
+            "cs2.exe": "🎮 Game Bắn Súng (FPS - Sắc Bén)",
+            "valorant-win64-shipping.exe": "🎮 Game Bắn Súng (FPS - Sắc Bén)",
+            "forzahorizon5.exe": "🏎️ Game Đua Xe (Racing - Tốc Độ)",
+            "eldenring.exe": "⚔️ Game Nhập Vai & Hành Động (RPG)",
+            "blackmythwukong.exe": "⚔️ Game Nhập Vai & Hành Động (RPG)",
+            "spotify.exe": "🎵 Âm Nhạc Sôi Động (EDM/Rock)",
+        }
+    )
+
     stats: RuntimeStats = field(default_factory=RuntimeStats)
 
     def snapshot(self):
@@ -495,6 +516,10 @@ class SharedVibrationParams:
                 "apex_reactive_type": self.apex_reactive_type,
                 "apex_static_color": self.apex_static_color,
                 "apex_brightness": self.apex_brightness,
+                "minimize_to_tray": self.minimize_to_tray,
+                "auto_game_detect": self.auto_game_detect,
+                "fallback_preset": self.fallback_preset,
+                "game_profiles": dict(self.game_profiles),
                 "stats": asdict(self.stats),
             }
 
@@ -973,6 +998,458 @@ class VerticalMeter(tk.Frame):
         self.value_label.config(text=self.value_format.format(value))
 
 
+def get_foreground_process_name():
+    try:
+        hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            return ""
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        if pid <= 0:
+            return ""
+        return psutil.Process(pid).name().lower()
+    except Exception:
+        return ""
+
+
+def get_running_window_processes():
+    procs = {}
+
+    def enum_windows_callback(hwnd, _):
+        try:
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).strip()
+                if title:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    if pid > 0:
+                        name = psutil.Process(pid).name().lower()
+                        if name not in {
+                            "explorer.exe",
+                            "taskmgr.exe",
+                            "applicationframehost.exe",
+                            "shellexperiencehost.exe",
+                        }:
+                            if name not in procs:
+                                procs[name] = title
+        except Exception:
+            pass
+
+    try:
+        win32gui.EnumWindows(enum_windows_callback, None)
+    except Exception:
+        pass
+    return procs
+
+
+class SystemTrayManager:
+    def __init__(self, app):
+        self.app = app
+        self.icon = None
+        self._thread = None
+        self._setup_tray()
+
+    def _setup_tray(self):
+        try:
+            icon_path = Path("app.ico")
+            if not icon_path.exists():
+                icon_path = APP_PATH.parent / "app.ico"
+            if icon_path.exists():
+                image = Image.open(icon_path)
+            else:
+                image = Image.new("RGBA", (64, 64), (37, 99, 235, 255))
+
+            display_presets = [
+                "✨ Chuẩn Xúc Giác Haptic DualSense",
+                "🎮 Game Bắn Súng (FPS - Sắc Bén)",
+                "🏎️ Game Đua Xe (Racing - Tốc Độ)",
+                "⚔️ Game Nhập Vai & Hành Động (RPG)",
+                "🎵 Âm Nhạc Sôi Động (EDM/Rock)",
+                "🎙️ ASMR & Giọng Nói Thì Thầm",
+                "🎬 Phim Điện Ảnh & Bom Tấn",
+            ]
+            preset_items = [
+                pystray.MenuItem(p_name, self._make_preset_action(p_name))
+                for p_name in display_presets
+            ]
+
+            menu = pystray.Menu(
+                pystray.MenuItem("🖥️ Mở bảng điều khiển", self.on_open_clicked, default=True),
+                pystray.MenuItem("🟢 Bật / Tắt độ rung (F9)", self.on_toggle_vibration_clicked),
+                pystray.MenuItem("🎛️ Chuyển Cấu Hình (Preset)", pystray.Menu(*preset_items)),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("❌ Thoát ứng dụng", self.on_exit_clicked),
+            )
+
+            self.icon = pystray.Icon("XboxAudioRumbleStudio", image, APP_TITLE, menu=menu)
+        except Exception as exc:
+            self.app.log_queue.put(f"Lỗi khởi tạo System Tray: {exc}")
+
+    def _make_preset_action(self, preset_name):
+        def action(icon, item):
+            self.app.apply_preset_by_name(preset_name)
+        return action
+
+    def start(self):
+        if self.icon:
+            self._thread = threading.Thread(target=self.icon.run, daemon=True)
+            self._thread.start()
+
+    def stop(self):
+        if self.icon:
+            try:
+                self.icon.stop()
+            except Exception:
+                pass
+
+    def on_open_clicked(self, icon=None, item=None):
+        self.app.restore_from_tray()
+
+    def on_toggle_vibration_clicked(self, icon=None, item=None):
+        self.app.master.after(0, self.app.toggle_vibration)
+
+    def on_exit_clicked(self, icon=None, item=None):
+        self.app.quit_completely()
+
+
+class GameProfileDialog(tk.Toplevel):
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.title("🎮 Quản Lý Cấu Hình Game (Auto Game Profiles)")
+        self.geometry("740x520")
+        self.minsize(680, 460)
+        self.configure(bg="#0b0f16")
+        self.transient(parent)
+        self.grab_set()
+
+        snap = self.app.shared.snapshot()
+        self.profiles = dict(snap.get("game_profiles", {}))
+        self.fallback_preset = snap.get("fallback_preset", "✨ Chuẩn Xúc Giác Haptic DualSense")
+
+        self.preset_list = [
+            "✨ Chuẩn Xúc Giác Haptic DualSense",
+            "🎮 Game Bắn Súng (FPS - Sắc Bén)",
+            "🏎️ Game Đua Xe (Racing - Tốc Độ)",
+            "⚔️ Game Nhập Vai & Hành Động (RPG)",
+            "🎵 Âm Nhạc Sôi Động (EDM/Rock)",
+            "🎙️ ASMR & Giọng Nói Thì Thầm",
+            "🎬 Phim Điện Ảnh & Bom Tấn",
+        ]
+
+        self.create_widgets()
+        self.refresh_table()
+
+    def create_widgets(self):
+        header = tk.Frame(self, bg="#151b24", padx=16, pady=12)
+        header.pack(fill="x")
+        tk.Label(
+            header,
+            text="🎮 Quản Lý Cấu Hình Game Tự Động (Auto Game Profiles)",
+            bg="#151b24",
+            fg="#f8fafc",
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            header,
+            text="Tự động chuyển cấu hình Haptic phù hợp ngay khi bạn mở hoặc chuyển sang cửa sổ Game tương ứng.",
+            bg="#151b24",
+            fg="#94a3b8",
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(3, 0))
+
+        content = tk.Frame(self, bg="#0b0f16", padx=16, pady=12)
+        content.pack(fill="both", expand=True)
+
+        table_frame = tk.Frame(content, bg="#151b24", highlightthickness=1, highlightbackground="#293241")
+        table_frame.pack(fill="both", expand=True)
+
+        columns = ("process", "preset")
+        self.tree = ttk.Treeview(
+            table_frame,
+            columns=columns,
+            show="headings",
+            selectmode="browse",
+            height=8,
+        )
+        self.tree.heading("process", text="Tên Tiến Trình Game (.exe)")
+        self.tree.heading("preset", text="Cấu Hình Haptic (Preset) Gán")
+        self.tree.column("process", width=240, anchor="w")
+        self.tree.column("preset", width=380, anchor="w")
+
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+
+        edit_frame = tk.Frame(content, bg="#151b24", highlightthickness=1, highlightbackground="#293241", padx=12, pady=10)
+        edit_frame.pack(fill="x", pady=(10, 0))
+        edit_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(edit_frame, text="File Game:").grid(row=0, column=0, sticky="w", pady=4)
+        proc_row = tk.Frame(edit_frame, bg="#151b24")
+        proc_row.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=4)
+        proc_row.columnconfigure(0, weight=1)
+
+        self.proc_var = tk.StringVar()
+        self.proc_entry = tk.Entry(
+            proc_row,
+            textvariable=self.proc_var,
+            bg="#0d1118",
+            fg="#f8fafc",
+            insertbackground="#ffffff",
+            relief="solid",
+            bd=1,
+            font=("Segoe UI", 9),
+        )
+        self.proc_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        tk.Button(
+            proc_row,
+            text="📂 Duyệt File...",
+            command=self.browse_exe,
+            bg="#233044",
+            activebackground="#314158",
+            fg="#f8fafc",
+            relief="flat",
+            padx=8,
+            pady=3,
+            cursor="hand2",
+            font=("Segoe UI", 9),
+        ).grid(row=0, column=1, padx=(0, 6))
+
+        tk.Button(
+            proc_row,
+            text="⚡ Chọn Game Đang Chạy...",
+            command=self.pick_running_process,
+            bg="#1e3a8a",
+            activebackground="#2563eb",
+            fg="#f8fafc",
+            relief="flat",
+            padx=8,
+            pady=3,
+            cursor="hand2",
+            font=("Segoe UI", 9),
+        ).grid(row=0, column=2)
+
+        ttk.Label(edit_frame, text="Cấu Hình:").grid(row=1, column=0, sticky="w", pady=4)
+        self.selected_preset_var = tk.StringVar(value=self.preset_list[0])
+        self.preset_combo = ttk.Combobox(
+            edit_frame,
+            textvariable=self.selected_preset_var,
+            values=self.preset_list,
+            state="readonly",
+        )
+        self.preset_combo.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=4)
+
+        btn_action_row = tk.Frame(edit_frame, bg="#151b24")
+        btn_action_row.grid(row=2, column=0, columnspan=2, sticky="e", pady=(8, 0))
+
+        tk.Button(
+            btn_action_row,
+            text="➕ Thêm / Cập Nhật Game",
+            command=self.add_or_update_game,
+            bg="#2563eb",
+            activebackground="#1d4ed8",
+            fg="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=5,
+            cursor="hand2",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left", padx=(0, 8))
+
+        tk.Button(
+            btn_action_row,
+            text="🗑️ Xóa Game Chọn",
+            command=self.delete_selected_game,
+            bg="#991b1b",
+            activebackground="#b91c1c",
+            fg="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=5,
+            cursor="hand2",
+            font=("Segoe UI", 9),
+        ).pack(side="left")
+
+        bottom_frame = tk.Frame(self, bg="#0b0f16", padx=16, pady=10)
+        bottom_frame.pack(fill="x", side="bottom")
+
+        fallback_frame = tk.Frame(bottom_frame, bg="#0b0f16")
+        fallback_frame.pack(side="left", fill="x")
+        tk.Label(
+            fallback_frame,
+            text="Cấu hình khi thoát Game:",
+            bg="#0b0f16",
+            fg="#cbd5e1",
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=(0, 6))
+
+        self.fallback_var = tk.StringVar(value=self.fallback_preset)
+        self.fallback_combo = ttk.Combobox(
+            fallback_frame,
+            textvariable=self.fallback_var,
+            values=self.preset_list,
+            state="readonly",
+            width=30,
+        )
+        self.fallback_combo.pack(side="left")
+
+        tk.Button(
+            bottom_frame,
+            text="💾 Lưu & Áp Dụng",
+            command=self.save_and_close,
+            bg="#16a34a",
+            activebackground="#15803d",
+            fg="#ffffff",
+            relief="flat",
+            padx=16,
+            pady=6,
+            cursor="hand2",
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="right", padx=(8, 0))
+
+        tk.Button(
+            bottom_frame,
+            text="Đóng",
+            command=self.destroy,
+            bg="#374151",
+            activebackground="#4b5563",
+            fg="#f8fafc",
+            relief="flat",
+            padx=14,
+            pady=6,
+            cursor="hand2",
+            font=("Segoe UI", 9),
+        ).pack(side="right")
+
+    def refresh_table(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for proc, preset in sorted(self.profiles.items()):
+            self.tree.insert("", "end", values=(proc, preset))
+
+    def on_tree_select(self, _event):
+        selected = self.tree.selection()
+        if selected:
+            vals = self.tree.item(selected[0], "values")
+            if vals:
+                self.proc_var.set(vals[0])
+                self.selected_preset_var.set(vals[1])
+
+    def browse_exe(self):
+        file_path = filedialog.askopenfilename(
+            parent=self,
+            title="Chọn file thực thi của Game (.exe)",
+            filetypes=[("Chương trình thực thi", "*.exe"), ("Tất cả tập tin", "*.*")],
+        )
+        if file_path:
+            exe_name = Path(file_path).name.lower()
+            self.proc_var.set(exe_name)
+
+    def pick_running_process(self):
+        running = get_running_window_processes()
+        if not running:
+            messagebox.showinfo("Thông báo", "Không tìm thấy cửa sổ ứng dụng đang chạy nào.", parent=self)
+            return
+
+        popup = tk.Toplevel(self)
+        popup.title("Chọn Game hoặc Cửa Sổ Đang Mở")
+        popup.geometry("540x400")
+        popup.configure(bg="#0b0f16")
+        popup.transient(self)
+        popup.grab_set()
+
+        tk.Label(
+            popup,
+            text="Nhấp chọn ứng dụng / Game đang mở:",
+            bg="#0b0f16",
+            fg="#f8fafc",
+            font=("Segoe UI", 10, "bold"),
+            padx=12,
+            pady=8,
+        ).pack(anchor="w")
+
+        p_frame = tk.Frame(popup, bg="#151b24")
+        p_frame.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+
+        p_tree = ttk.Treeview(p_frame, columns=("proc", "title"), show="headings", selectmode="browse")
+        p_tree.heading("proc", text="Tiến trình (.exe)")
+        p_tree.heading("title", text="Tiêu đề cửa sổ")
+        p_tree.column("proc", width=160)
+        p_tree.column("title", width=340)
+        p_scroll = ttk.Scrollbar(p_frame, orient="vertical", command=p_tree.yview)
+        p_tree.configure(yscrollcommand=p_scroll.set)
+        p_tree.pack(side="left", fill="both", expand=True)
+        p_scroll.pack(side="right", fill="y")
+
+        for p_name, p_title in sorted(running.items()):
+            p_tree.insert("", "end", values=(p_name, p_title))
+
+        def select_and_close():
+            sel = p_tree.selection()
+            if sel:
+                v = p_tree.item(sel[0], "values")
+                if v:
+                    self.proc_var.set(v[0])
+            popup.destroy()
+
+        p_tree.bind("<Double-1>", lambda _e: select_and_close())
+
+        btn_row = tk.Frame(popup, bg="#0b0f16", padx=12, pady=8)
+        btn_row.pack(fill="x")
+        tk.Button(
+            btn_row,
+            text="Chọn",
+            command=select_and_close,
+            bg="#2563eb",
+            fg="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=4,
+            cursor="hand2",
+        ).pack(side="right")
+        tk.Button(
+            btn_row,
+            text="Hủy",
+            command=popup.destroy,
+            bg="#374151",
+            fg="#f8fafc",
+            relief="flat",
+            padx=12,
+            pady=4,
+            cursor="hand2",
+        ).pack(side="right", padx=(0, 6))
+
+    def add_or_update_game(self):
+        raw_proc = self.proc_var.get().strip().lower()
+        if not raw_proc:
+            messagebox.showwarning("Cảnh báo", "Vui lòng nhập hoặc chọn file game (.exe).", parent=self)
+            return
+        if not raw_proc.endswith(".exe"):
+            raw_proc += ".exe"
+        preset = self.selected_preset_var.get()
+        self.profiles[raw_proc] = preset
+        self.refresh_table()
+
+    def delete_selected_game(self):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        vals = self.tree.item(selected[0], "values")
+        if vals and vals[0] in self.profiles:
+            del self.profiles[vals[0]]
+            self.refresh_table()
+
+    def save_and_close(self):
+        with self.app.shared.lock:
+            self.app.shared.game_profiles = dict(self.profiles)
+            self.app.shared.fallback_preset = self.fallback_var.get()
+        self.app.save_settings()
+        self.app.log_queue.put(f"Đã cập nhật danh sách {len(self.profiles)} game tự động nhận diện.")
+        self.destroy()
+
+
 class VibrationApp:
     def __init__(self, master):
         self.master = master
@@ -981,12 +1458,19 @@ class VibrationApp:
         self.stop_event = threading.Event()
         self.audio_thread = None
         self.test_thread = None
+        self.watcher_thread = None
+        self.tray_manager = None
+        self.profile_dialog = None
+        self.last_active_game = ""
 
         self.configure_window()
         self.load_settings()
         self.create_widgets()
         self.sync_controls_from_params()
         self.start_engine()
+        self.start_tray()
+        self.start_game_watcher()
+        self.master.protocol("WM_DELETE_WINDOW", self.on_window_close_clicked)
         self.master.bind_all("<F9>", lambda _e: self.toggle_vibration())
         self.update_gui()
 
@@ -1134,6 +1618,41 @@ class VibrationApp:
 
         self.device_label = ttk.Label(device_panel, text="Nguồn âm thanh: Đang khởi tạo...", style="Muted.TLabel", wraplength=380)
         self.device_label.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+
+        # Cấu hình tự động theo game & Khay hệ thống
+        auto_game_row = tk.Frame(device_panel, bg="#151b24")
+        auto_game_row.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        auto_game_row.columnconfigure(0, weight=1)
+
+        self.auto_game_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            auto_game_row,
+            text="Tự động đổi cấu hình theo Game (Auto Detect)",
+            variable=self.auto_game_var,
+            command=self.set_auto_game_detect,
+        ).grid(row=0, column=0, sticky="w")
+
+        tk.Button(
+            auto_game_row,
+            text="🎮 Quản lý Game...",
+            command=self.open_game_profile_dialog,
+            bg="#233044",
+            activebackground="#314158",
+            fg="#f8fafc",
+            relief="flat",
+            padx=10,
+            pady=3,
+            cursor="hand2",
+            font=("Segoe UI", 9, "bold"),
+        ).grid(row=0, column=1, sticky="e")
+
+        self.minimize_tray_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            auto_game_row,
+            text="Thu nhỏ xuống khay hệ thống khi đóng [X]",
+            variable=self.minimize_tray_var,
+            command=self.set_minimize_to_tray,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
         # 2. Panel Chế độ & Xử lý Nâng cao
         mode_box, mode = self.make_panel(left, "Chế độ & Xử lý Âm thanh Không gian")
@@ -1425,6 +1944,10 @@ class VibrationApp:
             self.stereo_var.set(snap["stereo_panning"])
         if hasattr(self, "dual_var"):
             self.dual_var.set(snap["dual_motor_mode"])
+        if hasattr(self, "auto_game_var"):
+            self.auto_game_var.set(snap.get("auto_game_detect", True))
+        if hasattr(self, "minimize_tray_var"):
+            self.minimize_tray_var.set(snap.get("minimize_to_tray", True))
 
         if hasattr(self, "apex_enabled_var"):
             self.apex_enabled_var.set(snap["apex_led_enabled"])
@@ -1624,12 +2147,108 @@ class VibrationApp:
             self.log_text.delete("1.0", "80.0")
         self.log_text.config(state="disabled")
 
-    def on_closing(self):
+    def start_tray(self):
+        try:
+            self.tray_manager = SystemTrayManager(self)
+            self.tray_manager.start()
+        except Exception as exc:
+            self.log_queue.put(f"Lỗi khởi động System Tray: {exc}")
+
+    def start_game_watcher(self):
+        self.watcher_thread = threading.Thread(target=self._game_watcher_loop, daemon=True)
+        self.watcher_thread.start()
+
+    def _game_watcher_loop(self):
+        while not self.stop_event.is_set():
+            time.sleep(1.2)
+            snap = self.shared.snapshot()
+            if not snap.get("auto_game_detect", True):
+                continue
+
+            proc = get_foreground_process_name()
+            if not proc:
+                continue
+
+            profiles = snap.get("game_profiles", {})
+            if proc in profiles:
+                target_preset = profiles[proc]
+                if proc != self.last_active_game:
+                    self.last_active_game = proc
+                    self.master.after(0, self.auto_apply_game_preset, target_preset, proc)
+            else:
+                if self.last_active_game != "":
+                    current_exe = Path(sys.executable).name.lower()
+                    if proc != current_exe and "python" not in proc:
+                        self.last_active_game = ""
+                        fallback = snap.get("fallback_preset", "✨ Chuẩn Xúc Giác Haptic DualSense")
+                        self.master.after(0, self.auto_apply_fallback_preset, fallback)
+
+    def auto_apply_game_preset(self, target_preset, proc_name):
+        if target_preset in PRESETS:
+            self.preset_var.set(target_preset)
+            self.apply_preset()
+            self.log_queue.put(f"🎮 Phát hiện [{proc_name}] ➔ Tự động áp dụng: {target_preset}")
+
+    def auto_apply_fallback_preset(self, fallback_preset):
+        if fallback_preset in PRESETS:
+            self.preset_var.set(fallback_preset)
+            self.apply_preset()
+            self.log_queue.put(f"🔄 Thoát game ➔ Hoàn về cấu hình chuẩn: {fallback_preset}")
+
+    def apply_preset_by_name(self, name):
+        def _do():
+            if name in PRESETS:
+                self.preset_var.set(name)
+                self.apply_preset()
+        self.master.after(0, _do)
+
+    def set_auto_game_detect(self):
+        with self.shared.lock:
+            self.shared.auto_game_detect = self.auto_game_var.get()
+        self.log_queue.put(f"Tự động nhận diện Game: {'BẬT' if self.auto_game_var.get() else 'TẮT'}")
         self.save_settings()
-        self.stop_event.set()
+
+    def set_minimize_to_tray(self):
+        with self.shared.lock:
+            self.shared.minimize_to_tray = self.minimize_tray_var.get()
+        self.log_queue.put(f"Thu nhỏ xuống khay khi đóng: {'BẬT' if self.minimize_tray_var.get() else 'TẮT'}")
+        self.save_settings()
+
+    def open_game_profile_dialog(self):
+        if self.profile_dialog and self.profile_dialog.winfo_exists():
+            self.profile_dialog.lift()
+            self.profile_dialog.focus_force()
+        else:
+            self.profile_dialog = GameProfileDialog(self.master, self)
+
+    def on_window_close_clicked(self):
         snap = self.shared.snapshot()
-        set_vibration(snap["controller_index"], 0, 0)
-        self.master.after(120, self.master.destroy)
+        if snap.get("minimize_to_tray", True):
+            self.master.withdraw()
+            self.log_queue.put("Ứng dụng đang chạy ngầm dưới khay hệ thống (System Tray).")
+        else:
+            self.quit_completely()
+
+    def restore_from_tray(self):
+        def _do_restore():
+            self.master.deiconify()
+            self.master.lift()
+            self.master.focus_force()
+        self.master.after(0, _do_restore)
+
+    def quit_completely(self):
+        def _do_quit():
+            self.save_settings()
+            self.stop_event.set()
+            if self.tray_manager:
+                self.tray_manager.stop()
+            snap = self.shared.snapshot()
+            set_vibration(snap["controller_index"], 0, 0)
+            self.master.destroy()
+        self.master.after(0, _do_quit)
+
+    def on_closing(self):
+        self.on_window_close_clicked()
 
 
 if __name__ == "__main__":

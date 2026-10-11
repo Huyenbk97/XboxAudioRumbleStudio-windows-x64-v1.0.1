@@ -1,5 +1,5 @@
 {
-  "enabled": false,
+  "enabled": true,
   "controller_index": 0,
   "auto_profile": true,
   "stereo_panning": true,
@@ -11,7 +11,7 @@
   "adaptive_threshold": true,
   "auto_calibrating": false,
   "intensity": 0.85,
-  "vibration_threshold": 2920.0032315673825,
+  "vibration_threshold": 190.0,
   "dead_zone": 0.025,
   "attack_rate": 0.7,
   "release_rate": 0.3,
@@ -23,6 +23,17 @@
   "apex_led_enabled": true,
   "apex_led_mode": "Đồng bộ âm thanh",
   "apex_reactive_type": "Tần số âm thanh (Xanh->Tím->Đỏ)",
-  "apex_static_color": "#eab308",
-  "apex_brightness": 1.0
+  "apex_static_color": "#00b4d8",
+  "apex_brightness": 1.0,
+  "minimize_to_tray": true,
+  "auto_game_detect": true,
+  "fallback_preset": "✨ Chuẩn Xúc Giác Haptic DualSense",
+  "game_profiles": {
+    "cs2.exe": "🎮 Game Bắn Súng (FPS - Sắc Bén)",
+    "valorant-win64-shipping.exe": "🎮 Game Bắn Súng (FPS - Sắc Bén)",
+    "forzahorizon5.exe": "🏎️ Game Đua Xe (Racing - Tốc Độ)",
+    "eldenring.exe": "⚔️ Game Nhập Vai & Hành Động (RPG)",
+    "blackmythwukong.exe": "⚔️ Game Nhập Vai & Hành Động (RPG)",
+    "spotify.exe": "🎵 Âm Nhạc Sôi Động (EDM/Rock)"
+  }
 }

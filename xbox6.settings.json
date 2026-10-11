@@ -24,5 +24,16 @@
   "apex_led_mode": "Đồng bộ âm thanh",
   "apex_reactive_type": "Tần số âm thanh (Xanh->Tím->Đỏ)",
   "apex_static_color": "#ef4444",
-  "apex_brightness": 0.8
+  "apex_brightness": 0.8,
+  "minimize_to_tray": true,
+  "auto_game_detect": true,
+  "fallback_preset": "✨ Chuẩn Xúc Giác Haptic DualSense",
+  "game_profiles": {
+    "cs2.exe": "🎮 Game Bắn Súng (FPS - Sắc Bén)",
+    "valorant-win64-shipping.exe": "🎮 Game Bắn Súng (FPS - Sắc Bén)",
+    "forzahorizon5.exe": "🏎️ Game Đua Xe (Racing - Tốc Độ)",
+    "eldenring.exe": "⚔️ Game Nhập Vai & Hành Động (RPG)",
+    "blackmythwukong.exe": "⚔️ Game Nhập Vai & Hành Động (RPG)",
+    "spotify.exe": "🎵 Âm Nhạc Sôi Động (EDM/Rock)"
+  }
 }

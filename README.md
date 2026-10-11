@@ -57,9 +57,27 @@ Ngoài ra, ứng dụng tích hợp sẵn bộ giao tiếp phần cứng HID đ�
   * *Nhịp đập độ sáng (Pulse)*: Nhấp nháy cường độ sáng theo từng đợt rung.
 * **Chế độ Màu tĩnh (Static Color)**: Chọn màu nhanh từ bảng 8 màu rực rỡ hoặc chọn mã màu RGB bất kỳ.
 
-### 5. Giao Diện Người Dùng Hiện Đại (Dark Mode 100% Tiếng Việt)
+### 5. Chạy Ngầm Khay Hệ Thống (System Tray)
+* Hỗ trợ thu nhỏ ứng dụng xuống khay hệ thống Windows (Taskbar Tray) khi nhấn nút đóng cửa sổ `[X]`.
+* Menu chuột phải tiện lợi tại biểu tượng khay:
+  * 🖥️ Mở bảng điều khiển
+  * 🟢 Bật / Tắt độ rung tức thì (F9)
+  * 🎛️ Chuyển nhanh giữa tất cả các cấu hình Preset
+  * ❌ Thoát ứng dụng sạch sẽ
+
+### 6. Tự Động Đổi Cấu Hình Theo Game (Auto Game Profile Switching)
+* Tự động quét cửa sổ game đang hoạt động trên màn hình thời gian thực (Foreground Process Watcher).
+* Tự động chuyển đổi sang cấu hình Haptic tương ứng ngay khi vào game (CS2, Valorant, Forza Horizon, Elden Ring, Black Myth: Wukong...).
+* Tự động hoàn về cấu hình chuẩn khi thoát game về Desktop hoặc trình duyệt.
+* Tích hợp **Hộp thoại Quản lý Game (Game Profile Manager)**:
+  * ⚡ Thêm game 1-click trực tiếp từ danh sách các ứng dụng / game đang mở.
+  * 📂 Duyệt file `.exe` tùy ý trên máy tính.
+  * ⚙️ Tùy chỉnh Preset dự phòng khi thoát game.
+
+### 7. Giao Diện Người Dùng Hiện Đại (Dark Mode 100% Tiếng Việt)
 * Thiết kế tối ưu hiển thị, trực quan với **7 phổ đo thời gian thực** (Tổng âm lượng, Âm trầm, Âm đanh, Nhịp trống, Overdrive Kick, Motor Trái/Phải).
 * Nút bấm bật/tắt nguồn rung lớn trên Header chuyển màu Xanh/Đỏ trực quan.
+
 
 ---
 
