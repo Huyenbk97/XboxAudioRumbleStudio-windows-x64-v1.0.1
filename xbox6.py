@@ -841,7 +841,9 @@ def audio_vibration_thread(shared, log_queue, stop_event):
 
         active_proc_cap = None
         active_cap_pid = 0
+        active_proc_name = ""
         active_audio_source_desc = loopback_device["name"]
+        proc_silence_count = 0
 
         while not stop_event.is_set():
             snap = shared.snapshot()
@@ -887,20 +889,40 @@ def audio_vibration_thread(shared, log_queue, stop_event):
                         active_proc_cap = proctap.ProcessAudioCapture(target_pid)
                         active_proc_cap.start()
                         active_cap_pid = target_pid
-                        log_queue.put(f"🎯 Bắt đầu cô lập âm thanh cho Game (PID {target_pid})")
+                        proc_silence_count = 0
+                        try:
+                            active_proc_name = psutil.Process(target_pid).name()
+                        except Exception:
+                            active_proc_name = f"PID {target_pid}"
+                        log_queue.put(f"🎯 Bắt đầu cô lập âm thanh cho {active_proc_name} (PID {target_pid})")
                     except Exception as exc:
                         log_queue.put(f"Chưa thể kết nối âm thanh PID {target_pid}: {exc}. Dùng âm thanh hệ thống.")
                         active_proc_cap = None
                         active_cap_pid = 0
+                        active_proc_name = ""
 
                 if active_proc_cap is not None and active_proc_cap.is_running:
                     try:
                         raw_proc = active_proc_cap.read(timeout=0.012)
                         if raw_proc is not None and len(raw_proc) > 0:
-                            raw_samples = np.frombuffer(raw_proc, dtype=np.float32) * 32767.0
-                            using_proc_loopback = True
+                            proc_samples = np.frombuffer(raw_proc, dtype=np.float32) * 32767.0
+                            # Kiểm tra độ lớn tín hiệu thực tế của tiến trình
+                            proc_rms = float(np.sqrt(np.mean(np.square(proc_samples)) + 1e-10))
+                            if proc_rms > 12.0:
+                                raw_samples = proc_samples
+                                using_proc_loopback = True
+                                proc_silence_count = 0
+                            else:
+                                proc_silence_count += 1
+                                # Nếu tiến trình game im lặng tạm thời (< 20 frame ~ 200ms), vẫn dùng buffer của game
+                                if proc_silence_count < 15:
+                                    raw_samples = proc_samples
+                                    using_proc_loopback = True
+                                else:
+                                    # Game im lặng hoặc stream phát qua child process -> Fallback qua hệ thống để không mất rung
+                                    raw_samples = None
                     except Exception:
-                        pass
+                        raw_samples = None
             else:
                 if active_proc_cap is not None:
                     try:
@@ -909,6 +931,8 @@ def audio_vibration_thread(shared, log_queue, stop_event):
                         pass
                     active_proc_cap = None
                     active_cap_pid = 0
+                    active_proc_name = ""
+                    proc_silence_count = 0
 
             # Fallback về System Loopback nếu chưa có dữ liệu từ Process Capture
             if raw_samples is None:
@@ -922,9 +946,9 @@ def audio_vibration_thread(shared, log_queue, stop_event):
 
             # Cập nhật mô tả nguồn âm thanh
             if using_proc_loopback:
-                active_audio_source_desc = f"🎯 Đang cô lập Game (PID {active_cap_pid})"
+                active_audio_source_desc = f"🎯 Đang cô lập {active_proc_name} (PID {active_cap_pid})"
             elif req_mode == "auto_game_process" and target_pid > 0:
-                active_audio_source_desc = f"🔄 Chờ âm thanh PID {target_pid} (Tạm dùng Hệ thống)"
+                active_audio_source_desc = f"🔄 Chờ âm thanh {active_proc_name or ('PID ' + str(target_pid))} (Dự phòng Hệ thống)"
             else:
                 active_audio_source_desc = f"🔊 Toàn hệ thống: {loopback_device['name']}"
 
@@ -1277,6 +1301,11 @@ class VerticalMeter(tk.Frame):
 
 def get_foreground_process_info():
     try:
+        user32 = ctypes.windll.user32
+        hdesk = user32.OpenInputDesktop(0, False, 0x01FF)
+        if hdesk:
+            user32.SetThreadDesktop(hdesk)
+            user32.CloseDesktop(hdesk)
         hwnd = win32gui.GetForegroundWindow()
         if not hwnd:
             return "", 0
@@ -1316,6 +1345,11 @@ def get_running_window_processes():
             pass
 
     try:
+        user32 = ctypes.windll.user32
+        hdesk = user32.OpenInputDesktop(0, False, 0x01FF)
+        if hdesk:
+            user32.SetThreadDesktop(hdesk)
+            user32.CloseDesktop(hdesk)
         win32gui.EnumWindows(enum_windows_callback, None)
     except Exception:
         pass
@@ -2506,6 +2540,17 @@ class VibrationApp:
         self.watcher_thread.start()
 
     def _game_watcher_loop(self):
+        system_background_procs = {
+            "explorer.exe",
+            "taskmgr.exe",
+            "applicationframehost.exe",
+            "shellexperiencehost.exe",
+            "searchhost.exe",
+            "startmenuexperiencehost.exe",
+            "lockapp.exe",
+        }
+        current_exe = Path(sys.executable).name.lower()
+
         while not self.stop_event.is_set():
             time.sleep(1.2)
             snap = self.shared.snapshot()
@@ -2516,6 +2561,25 @@ class VibrationApp:
             if not proc:
                 continue
 
+            is_own_app = (proc == current_exe or "python" in proc or "xboxaudiorumble" in proc)
+            is_system_desktop = proc in system_background_procs
+
+            if is_own_app:
+                # Đang thao tác trên giao diện app, giữ nguyên trạng thái game
+                continue
+
+            if is_system_desktop:
+                # Thoát ra ngoài desktop / taskbar Windows
+                if self.last_active_game != "":
+                    self.last_active_game = ""
+                    fallback = snap.get("fallback_preset", "✨ Chuẩn Xúc Giác Haptic DualSense")
+                    self.master.after(0, self.auto_apply_fallback_preset, fallback)
+                with self.shared.lock:
+                    if self.shared.current_game_pid != 0:
+                        self.shared.current_game_pid = 0
+                continue
+
+            # Đang ở cửa sổ Game hoặc ứng dụng đang chạy
             profiles = snap.get("game_profiles", {})
             if proc in profiles:
                 target_preset = profiles[proc]
@@ -2524,15 +2588,15 @@ class VibrationApp:
                     with self.shared.lock:
                         self.shared.current_game_pid = proc_pid
                     self.master.after(0, self.auto_apply_game_preset, target_preset, proc)
+                else:
+                    with self.shared.lock:
+                        self.shared.current_game_pid = proc_pid
             else:
+                # Game chưa cấu hình trong profiles: vẫn cập nhật PID để cô lập âm thanh
+                with self.shared.lock:
+                    self.shared.current_game_pid = proc_pid
                 if self.last_active_game != "":
-                    current_exe = Path(sys.executable).name.lower()
-                    if proc != current_exe and "python" not in proc:
-                        self.last_active_game = ""
-                        with self.shared.lock:
-                            self.shared.current_game_pid = 0
-                        fallback = snap.get("fallback_preset", "✨ Chuẩn Xúc Giác Haptic DualSense")
-                        self.master.after(0, self.auto_apply_fallback_preset, fallback)
+                    self.last_active_game = ""
 
     def auto_apply_game_preset(self, target_preset, proc_name):
         if target_preset in PRESETS:
