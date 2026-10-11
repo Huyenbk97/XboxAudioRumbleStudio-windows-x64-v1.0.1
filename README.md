@@ -77,7 +77,7 @@ Ngoài ra, ứng dụng tích hợp sẵn bộ giao tiếp phần cứng HID đ�
 ### 7. Tách Riêng Nguồn Âm Thanh Theo Game (Per-Process Audio Isolation)
 * Công nghệ **WASAPI Process Loopback** chuyên sâu: Cô lập 100% âm thanh từ tiến trình game đang chơi theo PID.
 * Loại bỏ triệt để hiện tượng rung nhiễu do tiếng trò chuyện Discord, video YouTube chạy ngầm, hay nhạc trình duyệt web.
-* **Cơ chế Fallback thông minh**: Khi game chưa có âm thanh (load màn hình, tạm dừng), ứng dụng tự động hoàn về âm thanh hệ thống để giữ nhịp rung liên tục; khi game phát tiếng trở lại, tự động tái kích hoạt cô lập.
+* **Cơ chế Fallback thông minh**: Khi game chưa có âm thanh (load màn hình, tạm dừng) hoặc khi Alt-Tab ra ngoài, ứng dụng tự động hoàn về âm thanh hệ thống để giữ nhịp rung liên tục; khi game phát tiếng trở lại, tự động tái kích hoạt cô lập.
 * Dễ dàng chuyển đổi trực tiếp trên giao diện giữa `🎯 Tự động cô lập Game đang chơi` và `🔊 Toàn hệ thống Windows`.
 
 ### 8. Rung Độc Lập 2 Nút Cò LT/RT (Xbox Impulse & Flydigi Adaptive Triggers)
@@ -88,10 +88,13 @@ Ngoài ra, ứng dụng tích hợp sẵn bộ giao tiếp phần cứng HID đ�
   - **Cò Trái (LT - Phanh/Ngắm)**: Rung rần rãnh mịn theo phanh lốp rê trượt và tiếng gầm rú động cơ.
 * **Cơ chế Auto-Blend**: Tự động hòa trộn lực rung của cò vào thân khi sử dụng tay cầm 2 mô tơ thông thường, không gây lỗi driver.
 
-### 9. Giao Diện Người Dùng Hiện Đại (Dark Mode 100% Tiếng Việt)
+### 9. Luôn Rung Liên Tục Trong Background & Khi Alt-Tab (Win32 XInput Engine)
+* Khắc phục triệt để chính sách ngắt rung của Windows: Sử dụng luồng Win32 `XInputSetState` hoạt động liên tục ở chế độ nền, đảm bảo tay cầm luôn rung mượt mà khi Alt-Tab, chuyển cửa sổ hoặc đang trong game.
+* Tích hợp **Win32 Single-Instance Mutex** chống việc mở trùng lặp nhiều app ngầm gây xung đột tay cầm.
+
+### 10. Giao Diện Người Dùng Hiện Đại (Dark Mode 100% Tiếng Việt)
 * Thiết kế tối ưu hiển thị, trực quan với **9 phổ đo thời gian thực** (Tổng âm, Trầm/Nổ, Đanh/Súng, Nhịp điệu, Xung Kick, Motor Trái/Phải, Cò LT/RT).
 * Nút bấm bật/tắt nguồn rung lớn trên Header chuyển màu Xanh/Đỏ trực quan.
-
 
 
 ---

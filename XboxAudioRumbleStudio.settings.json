@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "controller_index": 0,
-  "auto_profile": true,
+  "auto_profile": false,
   "stereo_panning": true,
   "overdrive_boost": 0.75,
   "rhythm_punch": 0.7,
@@ -23,7 +23,7 @@
   "apex_led_enabled": true,
   "apex_led_mode": "Đồng bộ âm thanh",
   "apex_reactive_type": "Tần số âm thanh (Xanh->Tím->Đỏ)",
-  "apex_static_color": "#22c55e",
+  "apex_static_color": "#00b4d8",
   "apex_brightness": 1.0,
   "minimize_to_tray": true,
   "auto_game_detect": true,
@@ -38,10 +38,10 @@
   },
   "audio_capture_mode": "auto_game_process",
   "auto_process_fallback": true,
-  "current_game_pid": 18828,
-  "trigger_haptics_enabled": true,
+  "current_game_pid": 0,
+  "trigger_haptics_enabled": false,
   "trigger_left_gain": 0.7,
   "trigger_right_gain": 0.85,
-  "trigger_mode": "adaptive_gun_brake",
+  "trigger_mode": "linked_body",
   "trigger_threshold": 0.04
 }

@@ -1,6 +1,6 @@
 # Per-Process Audio Isolation (Phase 2) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Tách riêng nguồn thu âm thanh theo ứng dụng (Per-Process Audio Capture qua `proctap`) để chỉ bắt âm thanh từ Game đang chơi, triệt tiêu 100% tạp âm Discord/YouTube/Browser, có cơ chế tự động Fallback về âm thanh hệ thống khi game im lặng.
 
@@ -51,7 +51,7 @@ graph TD
 **Interfaces:**
 - Produces: `audio_capture_mode: str`, `auto_process_fallback: bool`, `current_game_pid: int` trong `SharedVibrationParams` & `RuntimeStats`.
 
-- [x] **Step 1: Viết test kiểm tra schema Phase 2**
+- [ ] **Step 1: Viết test kiểm tra schema Phase 2**
 
 Tạo file `test_phase2_schema.py`:
 ```python
@@ -75,12 +75,12 @@ if __name__ == "__main__":
     print("PHASE 2 SCHEMA TEST PASSED")
 ```
 
-- [x] **Step 2: Chạy test để xác nhận FAIL trước khi sửa code**
+- [ ] **Step 2: Chạy test để xác nhận FAIL trước khi sửa code**
 
 Run: `python test_phase2_schema.py`
 Expected: FAIL với AttributeError vì các thuộc tính chưa được khai báo.
 
-- [x] **Step 3: Bổ sung các trường vào SharedVibrationParams và snapshot() trong xbox6.py**
+- [ ] **Step 3: Bổ sung các trường vào SharedVibrationParams và snapshot() trong xbox6.py**
 
 Cập nhật `RuntimeStats` và `SharedVibrationParams`:
 ```python
@@ -95,7 +95,7 @@ Và cập nhật trong `snapshot()`:
     "current_game_pid": self.current_game_pid,
 ```
 
-- [x] **Step 4: Chạy test để xác nhận PASS**
+- [ ] **Step 4: Chạy test để xác nhận PASS**
 
 Run: `python test_phase2_schema.py`
 Expected: PASS ("PHASE 2 SCHEMA TEST PASSED").
@@ -112,7 +112,7 @@ Expected: PASS ("PHASE 2 SCHEMA TEST PASSED").
 - Consumes: `proctap.ProcessAudioCapture`, `SharedVibrationParams.current_game_pid`, `SharedVibrationParams.audio_capture_mode`.
 - Produces: `raw_samples: np.ndarray` (float32 scale [-32768, 32767]) sẵn sàng cho FFT.
 
-- [x] **Step 1: Viết test cho ProcessAudioCapture và chuyển đổi float32 sang int16 scale**
+- [ ] **Step 1: Viết test cho ProcessAudioCapture và chuyển đổi float32 sang int16 scale**
 
 Tạo file `test_process_audio_stream.py`:
 ```python
@@ -140,12 +140,12 @@ if __name__ == "__main__":
     print("PROCTAP AUDIO TEST PASSED")
 ```
 
-- [x] **Step 2: Chạy test để xác nhận PASS**
+- [ ] **Step 2: Chạy test để xác nhận PASS**
 
 Run: `python test_process_audio_stream.py`
 Expected: PASS.
 
-- [x] **Step 3: Tích hợp Hybrid Stream vào audio_vibration_thread trong xbox6.py**
+- [ ] **Step 3: Tích hợp Hybrid Stream vào audio_vibration_thread trong xbox6.py**
 
 Trong `audio_vibration_thread`:
 - Quản lý `current_proc_cap: Optional[proctap.ProcessAudioCapture] = None` và `active_capture_pid: int = 0`.
@@ -179,7 +179,7 @@ Trong `audio_vibration_thread`:
 **Interfaces:**
 - Produces: `get_foreground_process_info() -> tuple[str, int]`, cập nhật `shared.current_game_pid`.
 
-- [x] **Step 1: Viết test lấy thông tin process (tên và PID)**
+- [ ] **Step 1: Viết test lấy thông tin process (tên và PID)**
 
 Tạo file `test_watcher_pid.py`:
 ```python
@@ -196,12 +196,12 @@ if __name__ == "__main__":
     print("WATCHER PID TEST PASSED")
 ```
 
-- [x] **Step 2: Chạy test để xác nhận FAIL trước khi sửa code**
+- [ ] **Step 2: Chạy test để xác nhận FAIL trước khi sửa code**
 
 Run: `python test_watcher_pid.py`
 Expected: FAIL vì `get_foreground_process_info` chưa có.
 
-- [x] **Step 3: Triển khai get_foreground_process_info và cập nhật _game_watcher_loop()**
+- [ ] **Step 3: Triển khai get_foreground_process_info và cập nhật _game_watcher_loop()**
 
 Trong `xbox6.py`:
 ```python
@@ -229,7 +229,7 @@ Trong `_game_watcher_loop()`:
       self.shared.current_game_pid = 0
   ```
 
-- [x] **Step 4: Chạy test để xác nhận PASS**
+- [ ] **Step 4: Chạy test để xác nhận PASS**
 
 Run: `python test_watcher_pid.py`
 Expected: PASS ("WATCHER PID TEST PASSED").
@@ -245,7 +245,7 @@ Expected: PASS ("WATCHER PID TEST PASSED").
 **Interfaces:**
 - Produces: Combobox / Radiobutton lựa chọn nguồn thu âm thanh trên Panel 1, hiển thị trạng thái động trên `device_label`.
 
-- [x] **Step 1: Thêm Widget lựa chọn nguồn thu âm thanh vào Panel 1**
+- [ ] **Step 1: Thêm Widget lựa chọn nguồn thu âm thanh vào Panel 1**
 
 Trong `create_widgets()` (Panel 1):
 - Thêm hàng điều khiển nguồn thu âm thanh:
@@ -255,7 +255,7 @@ Trong `create_widgets()` (Panel 1):
     - `🔊 Toàn hệ thống Windows (Mặc định)`
   - Liên kết với `self.audio_mode_var` và gọi `self.set_audio_capture_mode()`.
 
-- [x] **Step 2: Triển khai phương thức set_audio_capture_mode() và đồng bộ**
+- [ ] **Step 2: Triển khai phương thức set_audio_capture_mode() và đồng bộ**
 
 ```python
 def set_audio_capture_mode(self):
@@ -278,28 +278,28 @@ Trong `sync_controls_from_params()`:
 - Modify: [installer.iss](file:///c:/Users/LapTopNhatAn/Downloads/Compressed/XboxAudioRumbleStudio-windows-x64-v1.0.1/installer.iss)
 - Modify: [README.md](file:///c:/Users/LapTopNhatAn/Downloads/Compressed/XboxAudioRumbleStudio-windows-x64-v1.0.1/README.md)
 
-- [x] **Step 1: Kiểm thử cú pháp toàn bộ file mã nguồn**
+- [ ] **Step 1: Kiểm thử cú pháp toàn bộ file mã nguồn**
 
 Run: `python -m py_compile xbox6.py`
 Expected: Exit code 0, không có lỗi.
 
-- [x] **Step 2: Chạy smoke test ứng dụng trong 3 giây**
+- [ ] **Step 2: Chạy smoke test ứng dụng trong 3 giây**
 
 Run: `python -c "import subprocess, time; p = subprocess.Popen(['python', 'xbox6.py']); time.sleep(3); p.terminate()"`
 Expected: Khởi động và thoát sạch sẽ không có ngoại lệ.
 
-- [x] **Step 3: Đóng gói lại file thực thi duy nhất bằng PyInstaller**
+- [ ] **Step 3: Đóng gói lại file thực thi duy nhất bằng PyInstaller**
 
 Run: `pyinstaller --noconfirm --onefile --windowed --icon=app.ico --name=XboxAudioRumbleStudio --collect-all proctap --collect-all scipy --distpath=. xbox6.py`
 Expected: Exit code 0, tạo file `XboxAudioRumbleStudio.exe`.
 
-- [x] **Step 4: Cập nhật installer.iss lên v1.2.0 và biên dịch lại Setup**
+- [ ] **Step 4: Cập nhật installer.iss lên v1.2.0 và biên dịch lại Setup**
 
 Nâng `MyAppVersion` lên `"1.2.0"` và `OutputBaseFilename=XboxAudioRumbleStudio-Setup-v1.2.0`.
 Run: `& "C:\Users\LapTopNhatAn\AppData\Local\Programs\Inno Setup 6\ISCC.exe" installer.iss`
 Expected: Tạo thành công `XboxAudioRumbleStudio-Setup-v1.2.0.exe`.
 
-- [x] **Step 5: Dọn dẹp test tạm và commit Git**
+- [ ] **Step 5: Dọn dẹp test tạm và commit Git**
 
 Xóa các file test tạm: `test_phase2_schema.py`, `test_process_audio_stream.py`, `test_watcher_pid.py`.
 Commit Git toàn bộ tính năng Phase 2 lên nhánh `main`.
