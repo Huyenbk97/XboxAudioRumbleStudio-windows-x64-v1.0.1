@@ -38,5 +38,10 @@
   },
   "audio_capture_mode": "auto_game_process",
   "auto_process_fallback": true,
-  "current_game_pid": 0
+  "current_game_pid": 0,
+  "trigger_haptics_enabled": true,
+  "trigger_left_gain": 0.7,
+  "trigger_right_gain": 0.85,
+  "trigger_mode": "adaptive_gun_brake",
+  "trigger_threshold": 0.04
 }

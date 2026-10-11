@@ -437,6 +437,9 @@ class RuntimeStats:
     stereo_pan: float = 0.0
     apex_connected: bool = False
     current_led_hex: str = "#00b4d8"
+    peak_left_trigger: float = 0.0
+    peak_right_trigger: float = 0.0
+    trigger_haptics_active: bool = False
 
 
 @dataclass
@@ -491,6 +494,13 @@ class SharedVibrationParams:
     auto_process_fallback: bool = True
     current_game_pid: int = 0
 
+    # Cài đặt Rung Độc Lập 2 Nút Cò LT/RT - Xbox Impulse & Flydigi Triggers (Phase 3)
+    trigger_haptics_enabled: bool = True
+    trigger_left_gain: float = 0.70
+    trigger_right_gain: float = 0.85
+    trigger_mode: str = "adaptive_gun_brake"
+    trigger_threshold: float = 0.04
+
     stats: RuntimeStats = field(default_factory=RuntimeStats)
 
     def snapshot(self):
@@ -529,6 +539,11 @@ class SharedVibrationParams:
                 "audio_capture_mode": self.audio_capture_mode,
                 "auto_process_fallback": self.auto_process_fallback,
                 "current_game_pid": self.current_game_pid,
+                "trigger_haptics_enabled": self.trigger_haptics_enabled,
+                "trigger_left_gain": self.trigger_left_gain,
+                "trigger_right_gain": self.trigger_right_gain,
+                "trigger_mode": self.trigger_mode,
+                "trigger_threshold": self.trigger_threshold,
                 "stats": asdict(self.stats),
             }
 
