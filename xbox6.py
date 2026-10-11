@@ -405,6 +405,37 @@ class FlydigiApexController:
             self.last_send_time = now
             return True
 
+    def set_triggers(self, left_force: float, right_force: float, mode: int = 1) -> bool:
+        """Gửi gói tin cấu hình rung phản hồi xúc giác cho 2 nút cò Flydigi Apex 3/4 & Vader 3/4 Pro."""
+        with self.lock:
+            now = time.monotonic()
+            if not self.is_connected or not self.handle:
+                if (now - self.last_scan_time) < 1.5:
+                    return False
+                if not self.connect():
+                    return False
+
+            lf = int(clamp(left_force) * 255)
+            rf = int(clamp(right_force) * 255)
+
+            cmd = [0x5A, 0xA5, 0xF6, 0x06, mode, lf, mode, rf]
+            checksum = sum(cmd[2:]) & 0xFF
+            cmd.append(checksum)
+
+            target_len = max(32, self.report_length)
+            report = bytes([0x03]) + bytes(cmd).ljust(target_len - 1, b"\x00")
+
+            written = wintypes.DWORD()
+            res = self.kernel32.WriteFile(self.handle, report, len(report), ctypes.byref(written), None)
+            if res and written.value > 0:
+                return True
+            try:
+                if self.hid.HidD_SetOutputReport(self.handle, report, len(report)):
+                    return True
+            except Exception:
+                pass
+            return False
+
     def close(self):
         with self.lock:
             if self.handle:
@@ -414,6 +445,9 @@ class FlydigiApexController:
                     pass
                 self.handle = None
                 self.is_connected = False
+
+
+FlydigiController = FlydigiApexController
 
 
 @dataclass
@@ -1069,8 +1103,12 @@ def audio_vibration_thread(shared, log_queue, stop_event):
 
             if snap["enabled"] and connected:
                 dispatcher.set_vibration_4ch(controller_index, left_vib, right_vib, left_trigger_vib, right_trigger_vib)
+                if apex_ctrl.is_connected and snap.get("trigger_haptics_enabled", True):
+                    apex_ctrl.set_triggers(left_trigger_vib, right_trigger_vib)
             else:
                 dispatcher.set_vibration_4ch(controller_index, 0.0, 0.0, 0.0, 0.0)
+                if apex_ctrl.is_connected:
+                    apex_ctrl.set_triggers(0.0, 0.0)
                 if not snap["enabled"]:
                     left_vib = right_vib = left_trigger_vib = right_trigger_vib = 0.0
 
