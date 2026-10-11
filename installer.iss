@@ -1,5 +1,5 @@
 #define MyAppName "Xbox Audio Rumble Studio"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Huyenbk97"
 #define MyAppExeName "XboxAudioRumbleStudio.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=.
-OutputBaseFilename=XboxAudioRumbleStudio-Setup-v1.1.0
+OutputBaseFilename=XboxAudioRumbleStudio-Setup-v1.2.0
 SetupIconFile=app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes

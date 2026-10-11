@@ -35,5 +35,8 @@
     "eldenring.exe": "⚔️ Game Nhập Vai & Hành Động (RPG)",
     "blackmythwukong.exe": "⚔️ Game Nhập Vai & Hành Động (RPG)",
     "spotify.exe": "🎵 Âm Nhạc Sôi Động (EDM/Rock)"
-  }
+  },
+  "audio_capture_mode": "auto_game_process",
+  "auto_process_fallback": true,
+  "current_game_pid": 0
 }

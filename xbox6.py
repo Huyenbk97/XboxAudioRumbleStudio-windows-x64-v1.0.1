@@ -13,6 +13,7 @@ from ctypes import wintypes
 
 import numpy as np
 import pyaudiowpatch as pyaudio
+import proctap
 from PIL import Image
 import pystray
 import psutil
@@ -485,6 +486,11 @@ class SharedVibrationParams:
         }
     )
 
+    # Cài đặt Nguồn Thu Âm Thanh & Cô Lập Tiến Trình (Phase 2)
+    audio_capture_mode: str = "auto_game_process"
+    auto_process_fallback: bool = True
+    current_game_pid: int = 0
+
     stats: RuntimeStats = field(default_factory=RuntimeStats)
 
     def snapshot(self):
@@ -520,6 +526,9 @@ class SharedVibrationParams:
                 "auto_game_detect": self.auto_game_detect,
                 "fallback_preset": self.fallback_preset,
                 "game_profiles": dict(self.game_profiles),
+                "audio_capture_mode": self.audio_capture_mode,
+                "auto_process_fallback": self.auto_process_fallback,
+                "current_game_pid": self.current_game_pid,
                 "stats": asdict(self.stats),
             }
 
@@ -669,6 +678,10 @@ def audio_vibration_thread(shared, log_queue, stop_event):
         )
         log_queue.put(f"Đã bắt đầu thu âm: {loopback_device['name']} / {rate} Hz / {channels} kênh (Haptic Ready)")
 
+        active_proc_cap = None
+        active_cap_pid = 0
+        active_audio_source_desc = loopback_device["name"]
+
         while not stop_event.is_set():
             snap = shared.snapshot()
             controller_index = snap["controller_index"]
@@ -694,14 +707,65 @@ def audio_vibration_thread(shared, log_queue, stop_event):
                 noise_floor = 0.0
                 log_queue.put("Bắt đầu tự động hiệu chuẩn: Vui lòng giữ âm lượng nền ổn định trong 3 giây.")
 
-            try:
-                raw = stream.read(chunk, exception_on_overflow=False)
-            except Exception as exc:
-                log_queue.put(f"Lỗi đọc luồng âm thanh, đang thử lại: {exc}")
-                time.sleep(0.05)
-                continue
+            # Quản lý Hybrid Stream: Process Loopback (proctap) vs System Loopback (PyAudioWPatch)
+            req_mode = snap.get("audio_capture_mode", "auto_game_process")
+            target_pid = snap.get("current_game_pid", 0)
 
-            raw_samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+            raw_samples = None
+            using_proc_loopback = False
+
+            if req_mode == "auto_game_process" and target_pid > 0:
+                if active_cap_pid != target_pid:
+                    if active_proc_cap is not None:
+                        try:
+                            active_proc_cap.stop()
+                        except Exception:
+                            pass
+                        active_proc_cap = None
+                    try:
+                        active_proc_cap = proctap.ProcessAudioCapture(target_pid)
+                        active_proc_cap.start()
+                        active_cap_pid = target_pid
+                        log_queue.put(f"🎯 Bắt đầu cô lập âm thanh cho Game (PID {target_pid})")
+                    except Exception as exc:
+                        log_queue.put(f"Chưa thể kết nối âm thanh PID {target_pid}: {exc}. Dùng âm thanh hệ thống.")
+                        active_proc_cap = None
+                        active_cap_pid = 0
+
+                if active_proc_cap is not None and active_proc_cap.is_running:
+                    try:
+                        raw_proc = active_proc_cap.read(timeout=0.012)
+                        if raw_proc is not None and len(raw_proc) > 0:
+                            raw_samples = np.frombuffer(raw_proc, dtype=np.float32) * 32767.0
+                            using_proc_loopback = True
+                    except Exception:
+                        pass
+            else:
+                if active_proc_cap is not None:
+                    try:
+                        active_proc_cap.stop()
+                    except Exception:
+                        pass
+                    active_proc_cap = None
+                    active_cap_pid = 0
+
+            # Fallback về System Loopback nếu chưa có dữ liệu từ Process Capture
+            if raw_samples is None:
+                try:
+                    raw = stream.read(chunk, exception_on_overflow=False)
+                    raw_samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+                except Exception as exc:
+                    log_queue.put(f"Lỗi đọc luồng âm thanh, đang thử lại: {exc}")
+                    time.sleep(0.05)
+                    continue
+
+            # Cập nhật mô tả nguồn âm thanh
+            if using_proc_loopback:
+                active_audio_source_desc = f"🎯 Đang cô lập Game (PID {active_cap_pid})"
+            elif req_mode == "auto_game_process" and target_pid > 0:
+                active_audio_source_desc = f"🔄 Chờ âm thanh PID {target_pid} (Tạm dùng Hệ thống)"
+            else:
+                active_audio_source_desc = f"🔊 Toàn hệ thống: {loopback_device['name']}"
 
             # Xử lý Stereo không gian
             stereo_pan = 0.0
@@ -919,11 +983,17 @@ def audio_vibration_thread(shared, log_queue, stop_event):
                 shared.stats.stereo_pan = stereo_pan
                 shared.stats.apex_connected = apex_ctrl.is_connected
                 shared.stats.current_led_hex = cur_led_hex
+                shared.stats.device_name = active_audio_source_desc
 
             time.sleep(0.002)
     except Exception as exc:
         log_queue.put(f"Lỗi runtime: {exc}")
     finally:
+        if active_proc_cap is not None:
+            try:
+                active_proc_cap.stop()
+            except Exception:
+                pass
         snap = shared.snapshot()
         set_vibration(snap["controller_index"], 0, 0)
         apex_ctrl.close()
@@ -998,17 +1068,22 @@ class VerticalMeter(tk.Frame):
         self.value_label.config(text=self.value_format.format(value))
 
 
-def get_foreground_process_name():
+def get_foreground_process_info():
     try:
         hwnd = win32gui.GetForegroundWindow()
         if not hwnd:
-            return ""
+            return "", 0
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         if pid <= 0:
-            return ""
-        return psutil.Process(pid).name().lower()
+            return "", 0
+        return psutil.Process(pid).name().lower(), pid
     except Exception:
-        return ""
+        return "", 0
+
+
+def get_foreground_process_name():
+    name, _ = get_foreground_process_info()
+    return name
 
 
 def get_running_window_processes():
@@ -1606,22 +1681,36 @@ class VibrationApp:
         self.preset_combo.bind("<<ComboboxSelected>>", lambda _e: self.apply_preset())
         ttk.Button(preset_row, text="Áp dụng", command=self.apply_preset, width=8).grid(row=0, column=1)
 
-        ttk.Label(device_panel, text="Chiến lược").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(device_panel, text="Nguồn thu").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        self.audio_mode_var = tk.StringVar(value="🎯 Tự động cô lập Game đang chơi")
+        self.audio_mode_combo = ttk.Combobox(
+            device_panel,
+            textvariable=self.audio_mode_var,
+            values=[
+                "🎯 Tự động cô lập Game đang chơi",
+                "🔊 Toàn hệ thống Windows (Mặc định)",
+            ],
+            state="readonly",
+        )
+        self.audio_mode_combo.grid(row=2, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+        self.audio_mode_combo.bind("<<ComboboxSelected>>", lambda _e: self.set_audio_capture_mode())
+
+        ttk.Label(device_panel, text="Chiến lược").grid(row=3, column=0, sticky="w", pady=(8, 0))
         self.profile_label = ttk.Label(device_panel, text="Tự động nhận diện Haptic", style="Value.TLabel")
-        self.profile_label.grid(row=2, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
+        self.profile_label.grid(row=3, column=1, sticky="ew", padx=(10, 0), pady=(8, 0))
 
         button_row = tk.Frame(device_panel, bg="#151b24")
-        button_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        button_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         button_row.columnconfigure((0, 1), weight=1)
         ttk.Button(button_row, text="⚡ Tự động hiệu chuẩn", command=self.start_calibration, style="Accent.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ttk.Button(button_row, text="🎮 Kiểm tra rung", command=self.test_vibration).grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
         self.device_label = ttk.Label(device_panel, text="Nguồn âm thanh: Đang khởi tạo...", style="Muted.TLabel", wraplength=380)
-        self.device_label.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        self.device_label.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
         # Cấu hình tự động theo game & Khay hệ thống
         auto_game_row = tk.Frame(device_panel, bg="#151b24")
-        auto_game_row.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        auto_game_row.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         auto_game_row.columnconfigure(0, weight=1)
 
         self.auto_game_var = tk.BooleanVar(value=True)
@@ -1948,6 +2037,13 @@ class VibrationApp:
             self.auto_game_var.set(snap.get("auto_game_detect", True))
         if hasattr(self, "minimize_tray_var"):
             self.minimize_tray_var.set(snap.get("minimize_to_tray", True))
+        if hasattr(self, "audio_mode_var"):
+            curr_mode = snap.get("audio_capture_mode", "auto_game_process")
+            self.audio_mode_var.set(
+                "🎯 Tự động cô lập Game đang chơi"
+                if curr_mode == "auto_game_process"
+                else "🔊 Toàn hệ thống Windows (Mặc định)"
+            )
 
         if hasattr(self, "apex_enabled_var"):
             self.apex_enabled_var.set(snap["apex_led_enabled"])
@@ -2165,7 +2261,7 @@ class VibrationApp:
             if not snap.get("auto_game_detect", True):
                 continue
 
-            proc = get_foreground_process_name()
+            proc, proc_pid = get_foreground_process_info()
             if not proc:
                 continue
 
@@ -2174,12 +2270,16 @@ class VibrationApp:
                 target_preset = profiles[proc]
                 if proc != self.last_active_game:
                     self.last_active_game = proc
+                    with self.shared.lock:
+                        self.shared.current_game_pid = proc_pid
                     self.master.after(0, self.auto_apply_game_preset, target_preset, proc)
             else:
                 if self.last_active_game != "":
                     current_exe = Path(sys.executable).name.lower()
                     if proc != current_exe and "python" not in proc:
                         self.last_active_game = ""
+                        with self.shared.lock:
+                            self.shared.current_game_pid = 0
                         fallback = snap.get("fallback_preset", "✨ Chuẩn Xúc Giác Haptic DualSense")
                         self.master.after(0, self.auto_apply_fallback_preset, fallback)
 
@@ -2212,6 +2312,13 @@ class VibrationApp:
         with self.shared.lock:
             self.shared.minimize_to_tray = self.minimize_tray_var.get()
         self.log_queue.put(f"Thu nhỏ xuống khay khi đóng: {'BẬT' if self.minimize_tray_var.get() else 'TẮT'}")
+        self.save_settings()
+
+    def set_audio_capture_mode(self):
+        val = "auto_game_process" if "Tự động cô lập" in self.audio_mode_var.get() else "system"
+        with self.shared.lock:
+            self.shared.audio_capture_mode = val
+        self.log_queue.put(f"Chế độ nguồn thu âm: {self.audio_mode_var.get()}")
         self.save_settings()
 
     def open_game_profile_dialog(self):
