@@ -11,7 +11,7 @@
   "adaptive_threshold": true,
   "auto_calibrating": false,
   "intensity": 0.9,
-  "vibration_threshold": 210.0,
+  "vibration_threshold": 156.0445616798401,
   "dead_zone": 0.035,
   "attack_rate": 0.58,
   "release_rate": 0.22,
